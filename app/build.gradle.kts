@@ -14,6 +14,7 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
+import com.android.build.gradle.internal.tasks.CompileArtProfileTask
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -25,6 +26,12 @@ plugins {
 
 val isBuildingFoss = gradle.startParameter.taskRequests.any { req ->
     req.args.any { it.startsWith("assembleFoss") }
+}
+
+tasks.withType<CompileArtProfileTask>() {
+    // ART baseline profile is not 100% deterministic, so disable it for FOSS builds
+    // (as otherwise verification of those at F-Droid might fail)
+    enabled = !isBuildingFoss
 }
 
 android {
