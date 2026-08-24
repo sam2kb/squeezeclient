@@ -196,7 +196,7 @@ class MediaService :
             .add(SessionCommand(SESSION_ACTION_POWER, Bundle.EMPTY))
             .add(SessionCommand(SESSION_ACTION_DISCONNECT, Bundle.EMPTY))
             .build()
-        return ConnectionResult.AcceptedResultBuilder(session)
+        return ConnectionResult.AcceptedResultBuilder(session, controller)
             .setAvailableSessionCommands(sessionCommands)
             .build()
     }
