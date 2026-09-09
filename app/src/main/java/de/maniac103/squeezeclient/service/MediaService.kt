@@ -387,8 +387,6 @@ class MediaService :
             }
 
             val commandsBuilder = Player.Commands.Builder().apply {
-                add(COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS)
-                add(COMMAND_GET_DEVICE_VOLUME)
                 add(COMMAND_GET_CURRENT_MEDIA_ITEM)
                 add(COMMAND_GET_METADATA)
                 add(COMMAND_GET_TIMELINE)
@@ -403,8 +401,12 @@ class MediaService :
                 add(COMMAND_SEEK_TO_NEXT)
                 add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
                 add(COMMAND_SEEK_TO_PREVIOUS)
-                add(COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS)
                 add(COMMAND_STOP)
+                if (status.currentVolume != null) {
+                    add(COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS)
+                    add(COMMAND_GET_DEVICE_VOLUME)
+                    add(COMMAND_SET_DEVICE_VOLUME_WITH_FLAGS)
+                }
             }
 
             val playWhenReady = status.playbackState == PlayerStatus.PlayState.Playing
@@ -426,17 +428,19 @@ class MediaService :
                 .setContentPositionMs(
                     status.currentPlayPosition?.toLong(DurationUnit.MILLISECONDS) ?: C.TIME_UNSET
                 )
-                .setDeviceInfo(
+                .setPlayWhenReady(playWhenReady, PLAY_WHEN_READY_CHANGE_REASON_REMOTE)
+                .setPlaylist(playlist)
+                .setCurrentMediaItemIndex(currentIndex)
+
+            status.currentVolume?.let {
+                builder.setDeviceVolume(it)
+                builder.setDeviceInfo(
                     DeviceInfo.Builder(DeviceInfo.PLAYBACK_TYPE_REMOTE)
                         .setMinVolume(0)
                         .setMaxVolume(100)
                         .build()
                 )
-                .setPlayWhenReady(playWhenReady, PLAY_WHEN_READY_CHANGE_REASON_REMOTE)
-                .setPlaylist(playlist)
-                .setCurrentMediaItemIndex(currentIndex)
-
-            status.currentVolume?.let { builder.setDeviceVolume(it) }
+            }
             status.muted?.let { builder.setIsDeviceMuted(it) }
 
             return builder.build()
