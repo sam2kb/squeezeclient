@@ -319,6 +319,10 @@ class LocalPlayer(
     private fun updatePlayerVolume(isSetVolume: Boolean) {
         val volume = lastSetVolume ?: return
         val isPlaying = readyForPlayback && !paused
+        // Playback is still ongoing while buffering (e.g. right after a seek); the saved
+        // device volume must only be restored when playback is actually paused or stopped,
+        // otherwise the device volume briefly jumps to the saved value during a seek.
+        val playbackOngoing = readyForPlaybackOrBuffering && !paused
         val mode = prefs.localPlayerVolumeMode
         when {
             isSetVolume && mode == LocalPlayerVolumeMode.PlayerOnly -> {
@@ -337,7 +341,7 @@ class LocalPlayer(
                 applyVolumeAsDeviceVolume(volume)
             }
 
-            !isPlaying && lastSavedDeviceVolume != null -> {
+            !playbackOngoing && lastSavedDeviceVolume != null -> {
                 player.setDeviceVolume(lastSavedDeviceVolume!!, 0)
                 lastSavedDeviceVolume = null
             }
@@ -346,6 +350,7 @@ class LocalPlayer(
 
     private fun applyVolumeAsDeviceVolume(volume: Float) {
         val maxVolume = player.deviceInfo.maxVolume
+        if (maxVolume <= 0) return
         val volumeAsInt = (volume * maxVolume).roundToInt()
         player.setDeviceVolume(volumeAsInt, 0)
     }
