@@ -54,11 +54,51 @@ class FlacMetadataCachingDataReader(
             metadataCache.metadataBytes = metadataBytes
             listOf(BytesReader(metadataBytes))
         } else {
-            // After seek: cache only probe locally, inject probe + cached headers
+            // After seek: cache only probe locally, inject probe + cached headers.
+            // The stream may resume at an arbitrary byte offset which is not necessarily at a
+            // frame boundary, so skip ahead to the next frame sync before replaying the
+            // cached metadata.
             val cachedBytes = metadataCache.metadataBytes
                 ?: throw IOException("Trying to seek without metadata")
-            listOf(BytesReader(cachedBytes), BytesReader(probe))
+            listOf(BytesReader(cachedBytes), BytesReader(alignToFrameSync(probe)))
         }
+    }
+
+    private fun alignToFrameSync(probe: ByteArray): ByteArray {
+        var window = probe
+        var scannedBytes = 0
+        while (scannedBytes < MAX_FRAME_SYNC_SCAN_BYTES) {
+            for (i in 0 until window.size - 2) {
+                if (isFrameHeaderStart(window, i)) {
+                    return if (i == 0) {
+                        window
+                    } else {
+                        window.copyOfRange(i, window.size) + readExactly(i)
+                    }
+                }
+            }
+            window = window.copyOfRange(1, window.size) + byteArrayOf(readSingleByte())
+            scannedBytes++
+        }
+        throw IOException("FLAC frame sync not found within $MAX_FRAME_SYNC_SCAN_BYTES bytes")
+    }
+
+    private fun isFrameHeaderStart(window: ByteArray, index: Int): Boolean {
+        if (window[index] != 0xFF.toByte()) return false
+        if ((window[index + 1].toInt() and 0xFE) != 0xF8) return false
+        // Third frame header byte: block size code in the high nibble, sample rate code in
+        // the low nibble. Both have reserved values which don't occur in real streams, so use
+        // them to reject false sync codes inside frame data.
+        val blockAndSampleRate = window[index + 2].toUByte().toInt()
+        return (blockAndSampleRate and 0xF0) != 0 && (blockAndSampleRate and 0x0F) <= 0x0B
+    }
+
+    private fun readSingleByte(): Byte {
+        val single = ByteArray(1)
+        check(upstream.read(single, 0, 1) == 1) {
+            "Unexpected end of stream while searching for FLAC frame sync"
+        }
+        return single[0]
     }
 
     private fun readMetadata(magic: ByteArray): ByteArray {
@@ -100,6 +140,9 @@ class FlacMetadataCachingDataReader(
     }
 
     companion object {
+        // Generous upper bound: FLAC frames are at most a few hundred KB in practice.
+        private const val MAX_FRAME_SYNC_SCAN_BYTES = 4 * 1024 * 1024
+
         private class BytesReader(private val data: ByteArray) : DataReader {
             private var position = 0
             val isExhausted get() = position == data.size
