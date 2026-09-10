@@ -142,11 +142,29 @@ class LocalPlayer(
 
     @OptIn(UnstableApi::class)
     private fun initPlayer(context: Context): ExoPlayer {
+        // Resume quickly after a rebuffer: when the next track hasn't fully buffered by the
+        // time the current one ends, the default 2 s buffer-for-playback-after-rebuffer causes
+        // an audible pause at the track boundary.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                500
+            )
+            .build()
         val player = ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .setRenderersFactory(AudioSinkOverridingFactory(context))
+            .setLoadControl(loadControl)
             .setDeviceVolumeControlEnabled(true)
             .build()
+        // The server sends the next track's stream command while the current track is still
+        // playing. Pre-buffer it so it's ready once playback reaches the playlist item,
+        // which is required for gapless track transitions.
+        player.setPreloadConfiguration(
+            ExoPlayer.PreloadConfiguration(30.seconds.inWholeMicroseconds)
+        )
         player.addListener(this)
         if (BuildConfig.DEBUG) {
             player.addAnalyticsListener(EventLogger())
@@ -220,14 +238,17 @@ class LocalPlayer(
         val track = audioOutputProvider
             .latestAudioTrack
             ?.takeIf { readyForPlaybackOrBuffering && audioProcessor.hasProcessedData }
-        if (track?.getTimestamp(playbackPositionTimestamp) != true) {
-            return 0.seconds
+        if (track?.getTimestamp(playbackPositionTimestamp) == true) {
+            val timestampAge = (nowNanos - playbackPositionTimestamp.nanoTime)
+                .toDuration(DurationUnit.NANOSECONDS)
+            val framesElapsed = playbackPositionTimestamp.framePosition + audioProcessor.skippedFrames
+            val position = framesElapsed / track.sampleRate.toDouble()
+            return position.toDuration(DurationUnit.SECONDS) + timestampAge
         }
-        val timestampAge = (nowNanos - playbackPositionTimestamp.nanoTime)
-            .toDuration(DurationUnit.NANOSECONDS)
-        val framesElapsed = playbackPositionTimestamp.framePosition + audioProcessor.skippedFrames
-        val position = framesElapsed / track.sampleRate.toDouble()
-        return position.toDuration(DurationUnit.SECONDS) + timestampAge
+        // Fall back to ExoPlayer's own position estimate (e.g. when the AudioTrack
+        // timestamp isn't available). The server needs a correct position to deliver the
+        // next track in time for gapless playback.
+        return player.currentPosition.coerceAtLeast(0).toDuration(DurationUnit.MILLISECONDS)
     }
 
     @OptIn(UnstableApi::class)
