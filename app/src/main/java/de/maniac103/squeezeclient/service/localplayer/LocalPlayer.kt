@@ -318,10 +318,10 @@ class LocalPlayer(
 
     private fun updatePlayerVolume(isSetVolume: Boolean) {
         val volume = lastSetVolume ?: return
-        val isPlaying = readyForPlayback && !paused
-        // Playback is still ongoing while buffering (e.g. right after a seek); the saved
-        // device volume must only be restored when playback is actually paused or stopped,
-        // otherwise the device volume briefly jumps to the saved value during a seek.
+        // Playback is considered ongoing while playing or buffering to continue playing
+        // (e.g. right after a seek). In that case keep the app-set device volume applied
+        // instead of restoring the saved system volume; the saved volume is only restored
+        // once playback actually stops or pauses.
         val playbackOngoing = readyForPlaybackOrBuffering && !paused
         val mode = prefs.localPlayerVolumeMode
         when {
@@ -334,11 +334,16 @@ class LocalPlayer(
                 applyVolumeAsDeviceVolume(volume)
             }
 
-            isPlaying && mode == LocalPlayerVolumeMode.DeviceWhilePlaying -> {
-                if (lastSavedDeviceVolume == null) {
-                    lastSavedDeviceVolume = player.deviceVolume
+            playbackOngoing && mode == LocalPlayerVolumeMode.DeviceWhilePlaying -> {
+                // Apply already while buffering, before audio output starts: otherwise
+                // playback resumes at the previously restored system volume for a short
+                // moment (audible as a volume jump after seeking).
+                if (player.deviceInfo.maxVolume > 0) {
+                    if (lastSavedDeviceVolume == null) {
+                        lastSavedDeviceVolume = player.deviceVolume
+                    }
+                    applyVolumeAsDeviceVolume(volume)
                 }
-                applyVolumeAsDeviceVolume(volume)
             }
 
             !playbackOngoing && lastSavedDeviceVolume != null -> {
