@@ -30,6 +30,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import de.maniac103.squeezeclient.R
+import de.maniac103.squeezeclient.cometd.CometdClient
 import de.maniac103.squeezeclient.cometd.request.LibrarySearchRequest
 import de.maniac103.squeezeclient.databinding.FragmentSearchBinding
 import de.maniac103.squeezeclient.databinding.ListItemSearchCategoryBinding
@@ -184,20 +185,43 @@ class SearchFragment : ViewBindingFragment<FragmentSearchBinding>(FragmentSearch
         binding.categories.isVisible = true
         updateAdapter()
         lifecycleScope.launch {
-            val results = connectionHelper.getLocalLibrarySearchResultCounts(query)
-            artistCategory.count = results.artists
-            albumCategory.count = results.albums
-            genreCategory.count = results.genres
-            trackCategory.count = results.tracks
+            val results = try {
+                connectionHelper.getLocalLibrarySearchResultCounts(query)
+            } catch (e: IllegalStateException) {
+                // no active server connection (e.g. reconnect in progress)
+                null
+            } catch (e: CometdClient.CometdException) {
+                null
+            }
+            if (results == null) {
+                listOf(artistCategory, albumCategory, genreCategory, trackCategory)
+                    .forEach { it.busy = false }
+            } else {
+                artistCategory.count = results.artists
+                albumCategory.count = results.albums
+                genreCategory.count = results.genres
+                trackCategory.count = results.tracks
+            }
             updateAdapter()
         }
         lifecycleScope.launch {
-            val results = connectionHelper.getRadioSearchResults(
-                playerId,
-                query,
-                PagingParams.CountOnly
-            )
-            radioCategory.count = results.totalCount
+            val results = try {
+                connectionHelper.getRadioSearchResults(
+                    playerId,
+                    query,
+                    PagingParams.CountOnly
+                )
+            } catch (e: IllegalStateException) {
+                // no active server connection (e.g. reconnect in progress)
+                null
+            } catch (e: CometdClient.CometdException) {
+                null
+            }
+            if (results == null) {
+                radioCategory.busy = false
+            } else {
+                radioCategory.count = results.totalCount
+            }
             updateAdapter()
         }
     }
