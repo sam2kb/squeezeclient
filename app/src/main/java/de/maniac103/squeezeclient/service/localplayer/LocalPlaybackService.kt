@@ -212,6 +212,11 @@ class LocalPlaybackService :
     }
 
     private fun onDecodingFinished() = lifecycleScope.launch {
+        // The stream is done, so the next stream to be started belongs to a different track. As
+        // that track change is initiated by the server, it doesn't go through
+        // onPlaybackAdvancedToNextTrack(), hence allow reporting the track start again.
+        sentTrackStartStatus = false
+        sentBufferReady = false
         sendStatus(SlimprotoSocket.StatusType.DecoderUnderrun)
     }
 
