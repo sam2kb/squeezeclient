@@ -393,6 +393,7 @@ class MediaService :
         }
 
         override fun getState(): State {
+            val status = latestStatus
             val status = latestStatus ?: return waitingForPlayerState()
             status.playlist.nowPlaying?.let { lastKnownSong = it }
             // The server reports a sequence of intermediate states when changing tracks (track
