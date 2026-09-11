@@ -48,6 +48,7 @@ import de.maniac103.squeezeclient.extfuncs.localPlayerName
 import de.maniac103.squeezeclient.extfuncs.prefs
 import de.maniac103.squeezeclient.extfuncs.putLocalPlayerName
 import de.maniac103.squeezeclient.extfuncs.workManager
+import de.maniac103.squeezeclient.service.MediaService
 import de.maniac103.squeezeclient.service.NotificationIds
 import de.maniac103.squeezeclient.ui.MainActivity
 import de.maniac103.squeezeclient.ui.prefs.SettingsActivity
@@ -83,6 +84,7 @@ class LocalPlaybackService :
     private var slimprotoJob: Job? = null
     private var stateListenerJob: Job? = null
     private var statusUpdateJob: Job? = null
+    private var mediaSessionRequested = false
     private val slimprotoStateFlow = MutableStateFlow<SlimprotoState>(SlimprotoState.Disconnected)
 
     private var sentTrackStartStatus = false
@@ -128,7 +130,10 @@ class LocalPlaybackService :
                 repeatOnLifecycle(Lifecycle.State.STARTED) {
                     slimprotoStateFlow
                         .debounce(500.milliseconds)
-                        .collectLatest { updateForegroundNotification(it) }
+                        .collectLatest { state ->
+                            updateForegroundNotification(state)
+                            updateMediaSession(state)
+                        }
                 }
             }
         }
@@ -246,6 +251,23 @@ class LocalPlaybackService :
             }
             statusUpdateJob?.cancel()
             slimprotoStateFlow.emit(SlimprotoState.Disconnected)
+        }
+    }
+
+    /**
+     * Makes sure a media session exposing this device's player exists while playback is
+     * ongoing - the system (and with it e.g. a Bluetooth connected car head unit) can only
+     * show metadata and route controls for a player that has an active media session. This
+     * must not depend on the app UI having been opened, as playback can also be started
+     * remotely (e.g. from the LMS web UI).
+     */
+    private fun updateMediaSession(state: SlimprotoState) {
+        val playbackOngoing = state is SlimprotoState.PlayingOrPaused
+        if (playbackOngoing && !mediaSessionRequested) {
+            mediaSessionRequested = true
+            MediaService.startForLocalPlayer(this)
+        } else if (!playbackOngoing) {
+            mediaSessionRequested = false
         }
     }
 

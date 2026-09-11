@@ -52,6 +52,7 @@ import de.maniac103.squeezeclient.extfuncs.LocalPlayerVolumeMode
 import de.maniac103.squeezeclient.extfuncs.httpClient
 import de.maniac103.squeezeclient.extfuncs.localPlayerVolumeMode
 import de.maniac103.squeezeclient.extfuncs.prefs
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -101,14 +102,24 @@ class LocalPlayer(
     var volume: Float
         get() = lastSetVolume ?: 0F
         set(value) {
+            if (lastServerVolume?.let { abs(it - value) < 0.001f } == true) {
+                // The server sends its volume again on each stream start. Don't apply it in that
+                // case: the device volume might have been changed in the meantime (e.g. by a car
+                // head unit) and adopted as current volume, and re-applying the server volume
+                // would overwrite that change.
+                return
+            }
+            lastServerVolume = value
             lastSetVolume = value
             updatePlayerVolume(true)
         }
 
     private var lastSetVolume: Float? = null
+    private var lastServerVolume: Float? = null
     private var playerInternalVolume = 1F
     private var currentReplayGain = 1F
     private var lastSavedDeviceVolume: Int? = null
+    private var lastAppliedDeviceVolume: Int? = null
 
     @UnstableApi
     private val audioProcessor = LocalPlayerAudioProcessor(
@@ -142,11 +153,29 @@ class LocalPlayer(
 
     @OptIn(UnstableApi::class)
     private fun initPlayer(context: Context): ExoPlayer {
+        // Resume quickly after a rebuffer: when the next track hasn't fully buffered by the
+        // time the current one ends, the default 2 s buffer-for-playback-after-rebuffer causes
+        // an audible pause at the track boundary.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                500
+            )
+            .build()
         val player = ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .setRenderersFactory(AudioSinkOverridingFactory(context))
+            .setLoadControl(loadControl)
             .setDeviceVolumeControlEnabled(true)
             .build()
+        // The server sends the next track's stream command while the current track is still
+        // playing. Pre-buffer it so it's ready once playback reaches the playlist item,
+        // which is required for gapless track transitions.
+        player.setPreloadConfiguration(
+            ExoPlayer.PreloadConfiguration(30.seconds.inWholeMicroseconds)
+        )
         player.addListener(this)
         if (BuildConfig.DEBUG) {
             player.addAnalyticsListener(EventLogger())
@@ -220,14 +249,17 @@ class LocalPlayer(
         val track = audioOutputProvider
             .latestAudioTrack
             ?.takeIf { readyForPlaybackOrBuffering && audioProcessor.hasProcessedData }
-        if (track?.getTimestamp(playbackPositionTimestamp) != true) {
-            return 0.seconds
+        if (track?.getTimestamp(playbackPositionTimestamp) == true) {
+            val timestampAge = (nowNanos - playbackPositionTimestamp.nanoTime)
+                .toDuration(DurationUnit.NANOSECONDS)
+            val framesElapsed = playbackPositionTimestamp.framePosition + audioProcessor.skippedFrames
+            val position = framesElapsed / track.sampleRate.toDouble()
+            return position.toDuration(DurationUnit.SECONDS) + timestampAge
         }
-        val timestampAge = (nowNanos - playbackPositionTimestamp.nanoTime)
-            .toDuration(DurationUnit.NANOSECONDS)
-        val framesElapsed = playbackPositionTimestamp.framePosition + audioProcessor.skippedFrames
-        val position = framesElapsed / track.sampleRate.toDouble()
-        return position.toDuration(DurationUnit.SECONDS) + timestampAge
+        // Fall back to ExoPlayer's own position estimate (e.g. when the AudioTrack
+        // timestamp isn't available). The server needs a correct position to deliver the
+        // next track in time for gapless playback.
+        return player.currentPosition.coerceAtLeast(0).toDuration(DurationUnit.MILLISECONDS)
     }
 
     @OptIn(UnstableApi::class)
@@ -290,6 +322,29 @@ class LocalPlayer(
         updatePlayerVolume(false)
     }
 
+    override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) {
+        super.onDeviceVolumeChanged(volume, muted)
+        if (prefs.localPlayerVolumeMode != LocalPlayerVolumeMode.DeviceWhilePlaying) {
+            // In this mode the player volume isn't translated to the device volume, so there
+            // is nothing to adopt.
+            return
+        }
+        if (volume == lastAppliedDeviceVolume) {
+            // Change was caused by ourselves, don't adopt it.
+            return
+        }
+        // The volume was changed externally, e.g. by a car head unit using Bluetooth absolute
+        // volume. Adopt it as the desired volume, so it is not overwritten on the next
+        // playback state change (e.g. the next track).
+        val maxVolume = player.deviceInfo.maxVolume.takeIf { it > 0 } ?: return
+        lastSetVolume = volume.toFloat() / maxVolume
+        lastAppliedDeviceVolume = volume
+        if (lastSavedDeviceVolume != null) {
+            lastSavedDeviceVolume = volume
+        }
+        Log.d(TAG, "onDeviceVolumeChanged: adopted device volume $volume")
+    }
+
     override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
         super.onMediaMetadataChanged(mediaMetadata)
         mediaMetadata.title?.let { onMetadataReceived(it, mediaMetadata.artworkUri) }
@@ -297,7 +352,11 @@ class LocalPlayer(
 
     private fun updatePlayerVolume(isSetVolume: Boolean) {
         val volume = lastSetVolume ?: return
-        val isPlaying = readyForPlayback && !paused
+        // Playback is considered ongoing while playing or buffering to continue playing
+        // (e.g. right after a seek). In that case keep the app-set device volume applied
+        // instead of restoring the saved system volume; the saved volume is only restored
+        // once playback actually stops or pauses.
+        val playbackOngoing = readyForPlaybackOrBuffering && !paused
         val mode = prefs.localPlayerVolumeMode
         when {
             isSetVolume && mode == LocalPlayerVolumeMode.PlayerOnly -> {
@@ -309,23 +368,28 @@ class LocalPlayer(
                 applyVolumeAsDeviceVolume(volume)
             }
 
-            isPlaying && mode == LocalPlayerVolumeMode.DeviceWhilePlaying -> {
-                if (lastSavedDeviceVolume == null) {
-                    lastSavedDeviceVolume = player.deviceVolume
+            playbackOngoing && mode == LocalPlayerVolumeMode.DeviceWhilePlaying -> {
+                if (player.deviceInfo.maxVolume > 0) {
+                    if (lastSavedDeviceVolume == null) {
+                        lastSavedDeviceVolume = player.deviceVolume
+                    }
+                    applyVolumeAsDeviceVolume(volume)
                 }
-                applyVolumeAsDeviceVolume(volume)
             }
 
-            !isPlaying && lastSavedDeviceVolume != null -> {
-                player.setDeviceVolume(lastSavedDeviceVolume!!, 0)
+            !playbackOngoing && lastSavedDeviceVolume != null -> {
+                val savedVolume = lastSavedDeviceVolume ?: return
+                lastAppliedDeviceVolume = savedVolume
+                player.setDeviceVolume(savedVolume, 0)
                 lastSavedDeviceVolume = null
             }
         }
     }
 
     private fun applyVolumeAsDeviceVolume(volume: Float) {
-        val maxVolume = player.deviceInfo.maxVolume
+        val maxVolume = player.deviceInfo.maxVolume.takeIf { it > 0 } ?: return
         val volumeAsInt = (volume * maxVolume).roundToInt()
+        lastAppliedDeviceVolume = volumeAsInt
         player.setDeviceVolume(volumeAsInt, 0)
     }
 

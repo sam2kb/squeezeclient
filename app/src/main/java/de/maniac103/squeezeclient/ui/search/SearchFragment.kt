@@ -60,6 +60,7 @@ class SearchFragment : ViewBindingFragment<FragmentSearchBinding>(FragmentSearch
     private val listener get() = requireParentAs<Listener>()
 
     private var submitJob: Job? = null
+    private var searchJob: Job? = null
 
     private val artistCategory = Category(
         R.string.search_category_artists,
@@ -177,29 +178,55 @@ class SearchFragment : ViewBindingFragment<FragmentSearchBinding>(FragmentSearch
         }
     }
 
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        // MainActivity hides this screen while there is no connection; cancel pending
+        // searches in that case, so that no requests are published without a connection.
+        if (hidden) {
+            cancelSearchRequests()
+        }
+    }
+
     private fun submitSearch(query: String) {
         listOf(artistCategory, albumCategory, trackCategory, radioCategory)
             .forEach { it.busy = true }
         binding.divider.isVisible = true
         binding.categories.isVisible = true
         updateAdapter()
-        lifecycleScope.launch {
-            val results = connectionHelper.getLocalLibrarySearchResultCounts(query)
-            artistCategory.count = results.artists
-            albumCategory.count = results.albums
-            genreCategory.count = results.genres
-            trackCategory.count = results.tracks
-            updateAdapter()
+        searchJob?.cancel()
+        searchJob = lifecycleScope.launch {
+            launch { submitLocalLibrarySearch(query) }
+            launch { submitRadioSearch(query) }
         }
-        lifecycleScope.launch {
-            val results = connectionHelper.getRadioSearchResults(
-                playerId,
-                query,
-                PagingParams.CountOnly
-            )
-            radioCategory.count = results.totalCount
-            updateAdapter()
-        }
+    }
+
+    private suspend fun submitLocalLibrarySearch(query: String) {
+        val results = connectionHelper.getLocalLibrarySearchResultCounts(query)
+        artistCategory.count = results.artists
+        albumCategory.count = results.albums
+        genreCategory.count = results.genres
+        trackCategory.count = results.tracks
+        updateAdapter()
+    }
+
+    private suspend fun submitRadioSearch(query: String) {
+        val results = connectionHelper.getRadioSearchResults(
+            playerId,
+            query,
+            PagingParams.CountOnly
+        )
+        radioCategory.count = results.totalCount
+        updateAdapter()
+    }
+
+    private fun cancelSearchRequests() {
+        submitJob?.cancel()
+        submitJob = null
+        searchJob?.cancel()
+        searchJob = null
+        listOf(artistCategory, albumCategory, trackCategory, genreCategory, radioCategory)
+            .forEach { it.busy = false }
+        updateAdapter()
     }
 
     @SuppressLint("NotifyDataSetChanged")
