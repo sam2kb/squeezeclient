@@ -59,9 +59,11 @@ import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.extfuncs.connectionHelper
 import de.maniac103.squeezeclient.extfuncs.httpClient
 import de.maniac103.squeezeclient.extfuncs.lastSelectedPlayer
+import de.maniac103.squeezeclient.extfuncs.localPlayerName
 import de.maniac103.squeezeclient.extfuncs.prefs
 import de.maniac103.squeezeclient.extfuncs.volumeStepSize
 import de.maniac103.squeezeclient.model.PagingParams
+import de.maniac103.squeezeclient.model.Player as LmsPlayer
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
@@ -88,6 +90,9 @@ class MediaService :
     private lateinit var player: SqueezeboxPlayer
     private lateinit var mediaSession: MediaSession
     private var lastDisconnectionTime = Clock.System.now()
+    private var followLocalPlayer = false
+    private var followingLocalPlayer = false
+    private var latestPlayers: List<LmsPlayer> = emptyList()
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -160,12 +165,25 @@ class MediaService :
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         dispatcher.onServicePreSuperOnStart()
-        if (intent?.action == ACTION_START_WITH_PLAYER) {
-            val playerId = requireNotNull(
-                IntentCompat.getParcelableExtra(intent, "playerId", PlayerId::class.java)
-            )
-            player.currentPlayer = playerId
-            return START_STICKY
+        when (intent?.action) {
+            ACTION_START_WITH_PLAYER -> {
+                val playerId = requireNotNull(
+                    IntentCompat.getParcelableExtra(intent, "playerId", PlayerId::class.java)
+                )
+                followLocalPlayer = false
+                player.currentPlayer = playerId
+                return START_STICKY
+            }
+
+            ACTION_START_WITH_LOCAL_PLAYER -> {
+                // The local playback service asked us to expose this device's player to the
+                // system (e.g. for a car head unit). The server assigns the player ID, so it
+                // can only be resolved from the player list the server sends us.
+                followLocalPlayer = true
+                resolveLocalPlayer()
+                triggerNotificationUpdate()
+                return START_STICKY
+            }
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -227,12 +245,48 @@ class MediaService :
         // Update connection status first, because currentPlayer checked below
         // is updated on status changes
         player.isConnectedToServer = true
-        player.currentPlayer?.let { playerId ->
-            if (status.players.none { it.id == playerId }) {
-                // current player is gone
-                stopSelf()
-            }
+        latestPlayers = status.players
+        val currentPlayerId = player.currentPlayer
+        val currentPlayerInfo = status.players.firstOrNull { it.id == currentPlayerId }
+        if (currentPlayerInfo != null) {
+            // Remember whether we are following this device's player, as we want to keep the
+            // media session alive if it disappears from the player list for a moment (which
+            // happens when it reconnects to the server).
+            followingLocalPlayer = currentPlayerInfo.model == LOCAL_PLAYER_MODEL
+            return
         }
+        if (followLocalPlayer || followingLocalPlayer) {
+            // Our own player isn't in the list right now. The server sends an updated player
+            // list whenever it changes, so keep the media session (and with it the metadata
+            // announced to the system) and retry then.
+            resolveLocalPlayer()
+            return
+        }
+        if (currentPlayerId != null) {
+            // current player is gone
+            stopSelf()
+        }
+    }
+
+    /**
+     * Points the media session at this device's player, as identified by [LmsPlayer.model] and
+     * the configured local player name. Does nothing if the player isn't (yet) known to the
+     * server.
+     */
+    private fun resolveLocalPlayer() {
+        if (!followLocalPlayer) {
+            return
+        }
+        val localPlayer = findLocalPlayer(latestPlayers)
+        localPlayer?.let { player.currentPlayer = it.id }
+    }
+
+    private fun findLocalPlayer(players: List<LmsPlayer>): LmsPlayer? {
+        val localPlayers = players.filter { it.model == LOCAL_PLAYER_MODEL }
+        // The player name received from the server is NUL-terminated, and so is the value
+        // stored in the preferences.
+        val configuredName = prefs.localPlayerName?.trimEnd('\u0000')
+        return localPlayers.firstOrNull { it.name == configuredName } ?: localPlayers.singleOrNull()
     }
 
     private fun handleDisconnection() {
@@ -253,6 +307,14 @@ class MediaService :
 
     companion object {
         private val ACTION_START_WITH_PLAYER = MediaService::class.java.name + ".startWithPlayer"
+        private val ACTION_START_WITH_LOCAL_PLAYER =
+            MediaService::class.java.name + ".startWithLocalPlayer"
+
+        private const val WAITING_MEDIA_ID = "waitingForPlayer"
+
+        // Model capability sent by the local player implementation; the server reports it in
+        // the player list (see SlimprotoSocket.sendHello).
+        private const val LOCAL_PLAYER_MODEL = "squeezeclient"
 
         private const val SESSION_ACTION_POWER = "power"
         private const val SESSION_ACTION_DISCONNECT = "disconnect"
@@ -261,6 +323,18 @@ class MediaService :
             val intent = Intent(context, MediaService::class.java).apply {
                 action = ACTION_START_WITH_PLAYER
                 putExtra("playerId", playerId)
+            }
+            context.startForegroundService(intent)
+        }
+
+        /**
+         * Starts the media session for this device's local player, to be used when the local
+         * player starts playing without the app UI having been involved (e.g. because playback
+         * was started from a remote control).
+         */
+        fun startForLocalPlayer(context: Context) {
+            val intent = Intent(context, MediaService::class.java).apply {
+                action = ACTION_START_WITH_LOCAL_PLAYER
             }
             context.startForegroundService(intent)
         }
@@ -361,7 +435,13 @@ class MediaService :
         override fun getState(): State {
             val status = latestStatus
             val currentSong = status?.playlist?.nowPlaying
-                ?: return State.Builder().setPlaybackState(STATE_IDLE).build()
+            if (currentSong == null) {
+                return when (status) {
+                    null -> waitingForPlayerState()
+
+                    else -> State.Builder().setPlaybackState(STATE_IDLE).build()
+                }
+            }
 
             val currentSongDurationUs =
                 status.currentSongDuration?.toLong(DurationUnit.MICROSECONDS)
@@ -444,6 +524,25 @@ class MediaService :
             status.muted?.let { builder.setIsDeviceMuted(it) }
 
             return builder.build()
+        }
+
+        /**
+         * State to report while nothing is known about the controlled player yet (e.g. right
+         * after the service has been started). A buffering state with a placeholder item is
+         * reported instead of an empty state, because the media session only becomes visible
+         * to the system (and the service only gets into the foreground) if it has a timeline
+         * with a playing/buffering item.
+         */
+        private fun waitingForPlayerState(): State {
+            val placeholder = MediaItemData.Builder(0)
+                .setMediaItem(MediaItem.Builder().setMediaId(WAITING_MEDIA_ID).build())
+                .build()
+            return State.Builder()
+                .setPlaybackState(STATE_BUFFERING)
+                .setPlayWhenReady(true, PLAY_WHEN_READY_CHANGE_REASON_REMOTE)
+                .setPlaylist(listOf(placeholder))
+                .setCurrentMediaItemIndex(0)
+                .build()
         }
 
         @kotlin.OptIn(ExperimentalCoroutinesApi::class)
