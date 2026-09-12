@@ -322,6 +322,9 @@ class MediaService :
         private var pendingPlaylistChange: Instant? = null
         private var lastKnownSong: Playlist.PlaylistItem? = null
         private var lastState: State? = null
+        // The song the last reported state refers to, to tell whether a cached state still matches
+        // the song a newer player status reports.
+        private var lastStateSong: Playlist.PlaylistItem? = null
         private var statusSubscription: Job? = null
         private var stateInvalidationJob: Job? = null
         private var disconnectedTime = 0L
@@ -409,11 +412,11 @@ class MediaService :
 
             val window = latestPlaylist
             val windowCurrent = latestPlaylistChange == status.playlist.lastChange
-            if (!windowCurrent && pendingPlaylistChange != null) {
-                // The playlist changed and its new contents are still being fetched. Keep
-                // reporting the last known state instead of combining the new position with the
-                // outdated playlist contents, which would make us report a completely different
-                // song to connected devices (e.g. car head units) for a moment.
+            if (!windowCurrent && pendingPlaylistChange != null && currentSong == lastStateSong) {
+                // The playlist changed and its new contents are still being fetched. Keep the
+                // last known state while the status still reports the same song; if the status is
+                // newer than our playlist, its song wins - caching would show the previous track
+                // again to connected devices (e.g. car head units) after the new one appeared.
                 lastState?.let { return it }
             }
 
@@ -505,7 +508,10 @@ class MediaService :
             }
             status.muted?.let { builder.setIsDeviceMuted(it) }
 
-            return builder.build().also { lastState = it }
+            return builder.build().also {
+                lastState = it
+                lastStateSong = currentSong
+            }
         }
 
         /**
