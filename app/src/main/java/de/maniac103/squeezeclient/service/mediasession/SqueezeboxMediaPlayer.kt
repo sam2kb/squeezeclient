@@ -19,6 +19,8 @@ package de.maniac103.squeezeclient.service.mediasession
 
 import android.content.Context
 import android.os.Looper
+import android.os.SystemClock
+import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.coroutineScope
@@ -33,13 +35,20 @@ import androidx.media3.common.util.UnstableApi
 import de.maniac103.squeezeclient.Diag
 import de.maniac103.squeezeclient.cometd.ConnectionHelper
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
+import de.maniac103.squeezeclient.extfuncs.lastSessionPlayer
+import de.maniac103.squeezeclient.extfuncs.lastSessionPosition
+import de.maniac103.squeezeclient.extfuncs.lastSessionTimestamp
+import de.maniac103.squeezeclient.extfuncs.lastSessionWasPlaying
 import de.maniac103.squeezeclient.extfuncs.prefs
+import de.maniac103.squeezeclient.extfuncs.putLastSession
+import de.maniac103.squeezeclient.extfuncs.resumePlayback
 import de.maniac103.squeezeclient.extfuncs.volumeStepSize
 import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
@@ -88,6 +97,8 @@ class SqueezeboxMediaPlayer(
     private var playlistFetchJob: Job? = null
     private var delayedStateUpdateJob: Job? = null
     private var unacknowledgedStateRevertJob: Job? = null
+    private var statusSubscriptionStartTime = 0L
+    private var resumeAttempted = false
 
     override fun handleSetDeviceVolume(deviceVolume: Int, flags: Int) = future {
         val playerId = currentPlayer ?: return@future
@@ -345,6 +356,8 @@ class SqueezeboxMediaPlayer(
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun updatePlayer(playerId: PlayerId?) {
         Diag.log("player", "updatePlayer($playerId)")
+        statusSubscriptionStartTime = SystemClock.elapsedRealtime()
+        resumeAttempted = false
         statusSubscription?.cancel()
         if (playerId == null || !isConnectedToServer) {
             return
@@ -453,6 +466,70 @@ class SqueezeboxMediaPlayer(
         unacknowledgedStateChange = null
         unacknowledgedStateRevertJob?.cancel()
         invalidateState()
+        rememberSession(newPlayerState)
+        resumeLastSession(newPlayerState)
+    }
+
+    /**
+     * Remembers where playback was left off, so an interrupted session can be continued (see
+     * [resumeLastSession]).
+     */
+    private fun rememberSession(state: PlayerState) {
+        val playerId = currentPlayer ?: return
+        if (state.playbackState == PlayerStatus.PlayState.Playing) {
+            val position = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
+            appContext.prefs.edit { putLastSession(playerId, position, true) }
+            return
+        }
+        // Ignore what the server reports right after (re)connecting: it may still report the
+        // player as stopped before its previous state has been restored.
+        val settled = SystemClock.elapsedRealtime() - statusSubscriptionStartTime >
+            SESSION_SETTLE_TIME.inWholeMilliseconds
+        if (!settled) {
+            return
+        }
+        val position = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
+        appContext.prefs.edit { putLastSession(playerId, position, false) }
+    }
+
+    /**
+     * Continues the session that was interrupted by the app being stopped or by the connection to
+     * the server going away, at the position it was left at.
+     */
+    private fun resumeLastSession(state: PlayerState) {
+        val playerId = currentPlayer ?: return
+        if (resumeAttempted) {
+            return
+        }
+        val prefs = appContext.prefs
+        val lastPlayer = prefs.lastSessionPlayer
+        val age = System.currentTimeMillis() - prefs.lastSessionTimestamp
+        val resumable = prefs.resumePlayback && lastPlayer == playerId &&
+            prefs.lastSessionWasPlaying && age < SESSION_MAX_AGE.inWholeMilliseconds
+        Diag.log(
+            "resume",
+            "resumable=$resumable player=$playerId lastPlayer=$lastPlayer " +
+                "wasPlaying=${prefs.lastSessionWasPlaying} ageMs=$age " +
+                "position=${prefs.lastSessionPosition} state=${state.playbackState} " +
+                "powered=${state.powered}"
+        )
+        if (state.playbackState == PlayerStatus.PlayState.Playing || !resumable) {
+            resumeAttempted = true
+            return
+        }
+        if (!state.powered || state.currentSong == null) {
+            // Wait until the player is powered on and knows its playlist
+            return
+        }
+        resumeAttempted = true
+        val position = prefs.lastSessionPosition
+        Diag.log("resume", "continuing playback at position $position")
+        launch {
+            if (position > SESSION_MIN_POSITION.inWholeSeconds) {
+                connectionHelper.updatePlaybackPosition(playerId, position)
+            }
+            connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Playing)
+        }
     }
 
     private fun Playlist.PlaylistItem.toMediaItemDataBuilder(position: Int): MediaItemData.Builder {
@@ -501,4 +578,16 @@ class SqueezeboxMediaPlayer(
         val positionInTrack: Duration? = null,
         val playState: PlayerStatus.PlayState? = null
     )
+
+    companion object {
+        // Time a remembered session is considered worth resuming.
+        private val SESSION_MAX_AGE = 12.hours
+
+        // Don't resume positions very close to the start of a track.
+        private val SESSION_MIN_POSITION = 5.seconds
+
+        // Grace period after (re)connecting during which reported state is not remembered; the
+        // server may still report the player as stopped before restoring its previous state.
+        private val SESSION_SETTLE_TIME = 10.seconds
+    }
 }

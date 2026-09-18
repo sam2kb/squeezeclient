@@ -78,6 +78,29 @@ fun SharedPreferences.Editor.putLocalPlayerEnabled(enabled: Boolean) {
     putBoolean("local_player_enabled", enabled)
 }
 
+val SharedPreferences.resumePlayback get() = getBoolean("resume_playback", true)
+
+val SharedPreferences.lastSessionPlayer: PlayerId?
+    get() = getString("last_session_player", null)?.let { PlayerId(it) }
+
+val SharedPreferences.lastSessionPosition get() = getInt("last_session_position", 0)
+
+val SharedPreferences.lastSessionWasPlaying get() =
+    getBoolean("last_session_was_playing", false)
+
+val SharedPreferences.lastSessionTimestamp get() = getLong("last_session_timestamp", 0L)
+
+fun SharedPreferences.Editor.putLastSession(
+    playerId: PlayerId,
+    positionSeconds: Int,
+    wasPlaying: Boolean
+) {
+    putString("last_session_player", playerId.id)
+    putInt("last_session_position", positionSeconds)
+    putBoolean("last_session_was_playing", wasPlaying)
+    putLong("last_session_timestamp", System.currentTimeMillis())
+}
+
 enum class LocalPlayerVolumeMode(val prefValue: String) {
     PlayerOnly("playeronly"),
     Device("device"),
