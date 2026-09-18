@@ -22,6 +22,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.core.content.IntentCompat
 import androidx.core.os.bundleOf
@@ -73,6 +74,7 @@ class MediaService :
     private lateinit var mediaSession: MediaSession
     private var lastDisconnectionTime = Clock.System.now()
     private var delayedShutdownJob: Job? = null
+    private var lastSessionAnnouncement = 0L
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -175,6 +177,29 @@ class MediaService :
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = mediaSession
 
+    /**
+     * Re-announce the session when a device that isn't monitoring it (no controller connection)
+     * sends a media button: the Bluetooth stack only picks up a session when it re-evaluates its
+     * active sessions, which is what toggling Bluetooth effectively does.
+     */
+    override fun onMediaButtonEvent(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        intent: Intent
+    ): Boolean {
+        val hasExternalController =
+            mediaSession.connectedControllers.any { it.packageName != packageName }
+        // Only while playing: then the service is in the foreground and the notification survives.
+        val announcementDue = player.isPlaying &&
+            SystemClock.elapsedRealtime() - lastSessionAnnouncement > SESSION_ANNOUNCEMENT_DELAY
+        if (!hasExternalController && controller.packageName != packageName && announcementDue) {
+            lastSessionAnnouncement = SystemClock.elapsedRealtime()
+            removeSession(mediaSession)
+            addSession(mediaSession)
+        }
+        return false
+    }
+
     @OptIn(UnstableApi::class)
     override fun onConnect(
         session: MediaSession,
@@ -252,6 +277,9 @@ class MediaService :
 
         private const val SESSION_ACTION_POWER = "power"
         private const val SESSION_ACTION_DISCONNECT = "disconnect"
+
+        // Minimum time between two session re-announcements (see onMediaButtonEvent).
+        private const val SESSION_ANNOUNCEMENT_DELAY = 30000L
 
         fun start(context: Context, playerId: PlayerId, forcePlayerChange: Boolean) {
             val intent = Intent(context, MediaService::class.java).apply {
