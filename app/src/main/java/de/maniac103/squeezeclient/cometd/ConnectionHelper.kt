@@ -342,11 +342,15 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
     suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) =
         publishOneShotRequest(SetPlaybackPositionRequest(playerId, positionSeconds))
 
-    /** The position (in seconds) the server assumes the player to be at, or null if unknown. */
+    /**
+     * The position (in seconds) the server assumes the player to be at, or null if it does not
+     * know (no connection) or is not playing (in which case its position is meaningless).
+     */
     suspend fun fetchPlaybackPositionSeconds(playerId: PlayerId): Int? = runCatching {
-        doRequestWithResult<PlayerStatusResponse>(
-            PlayerStatusRequest(playerId)
-        ).playPosition.toInt()
+        val status = doRequestWithResult<PlayerStatusResponse>(PlayerStatusRequest(playerId))
+        status.playPosition
+            .takeIf { status.state == PlayerStatus.PlayState.Playing }
+            ?.toInt()
     }.getOrNull()
 
     suspend fun getLocalLibrarySearchResultCounts(
