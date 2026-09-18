@@ -25,6 +25,7 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -43,6 +44,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import de.maniac103.squeezeclient.Diag
 import de.maniac103.squeezeclient.R
+import de.maniac103.squeezeclient.extfuncs.connectionHelper
 import de.maniac103.squeezeclient.extfuncs.getOrCreateNotificationChannel
 import de.maniac103.squeezeclient.extfuncs.localPlayerEnabled
 import de.maniac103.squeezeclient.extfuncs.localPlayerName
@@ -53,6 +55,8 @@ import de.maniac103.squeezeclient.service.NotificationIds
 import de.maniac103.squeezeclient.service.mediasession.MediaService
 import de.maniac103.squeezeclient.ui.MainActivity
 import de.maniac103.squeezeclient.ui.prefs.SettingsActivity
+import kotlin.math.absoluteValue
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
@@ -89,6 +93,17 @@ class LocalPlaybackService :
 
     private var sentTrackStartStatus = false
     private var sentBufferReady = false
+    private var currentStreamUri: String? = null
+
+    /** Position in the track at which the current stream started. */
+    private var streamStartPosition = Duration.ZERO
+    private var streamInterrupted = false
+
+    /** Elapsed realtime until which a stream restarted by the server still continues our stream. */
+    private var continuationUntil = 0L
+
+    /** Whether the server was already asked to continue at our position. */
+    private var positionHandedOff = false
 
     override fun onCreate() {
         dispatcher.onServicePreSuperOnCreate()
@@ -210,6 +225,7 @@ class LocalPlaybackService :
     }
 
     private fun onPlaybackError() = lifecycleScope.launch {
+        streamInterrupted = true
         sentTrackStartStatus = false
         sendStatus(SlimprotoSocket.StatusType.StreamingFailed)
     }
@@ -252,6 +268,7 @@ class LocalPlaybackService :
                     .onSuccess { handleCommand(it) }
                     .onFailure {
                         Log.d(TAG, "Could not read command from socket", it)
+                        streamInterrupted = true
                         connected = slimproto.reconnect()
                     }
             }
@@ -324,15 +341,69 @@ class LocalPlaybackService :
         )
     }
 
-    private fun playerPosition(): kotlin.time.Duration =
-        player.determinePlaybackPosition(System.nanoTime())
+    private fun playerPosition(nowNanos: Long = System.nanoTime()): kotlin.time.Duration =
+        streamStartPosition + player.determinePlaybackPosition(nowNanos)
+
+    /**
+     * The stream the server just started continues at the position the server assumes the player
+     * to be at, so adopt that position as our starting point. This keeps our position consistent
+     * with the stream we receive, which matters whenever the server moved its position on its own
+     * (e.g. when restoring our previous session).
+     */
+    private fun alignPositionWithServer() = lifecycleScope.launch {
+        val streamUri = currentStreamUri
+        val serverPosition = fetchServerPosition() ?: return@launch
+        if (currentStreamUri != streamUri) {
+            return@launch // Another stream started in the meantime
+        }
+        val played = player.determinePlaybackPosition(System.nanoTime())
+        streamStartPosition = serverPosition.seconds - played
+        Diag.log(
+            "local",
+            "aligned with server: server=$serverPosition played=$played " +
+                "base=$streamStartPosition"
+        )
+    }
+
+    /**
+     * Asks the server to continue its stream at our position, so playback picks up where the user
+     * actually was instead of at the position the server deduced on its own. Only done when the
+     * difference between both is plausible, as a large difference means our position is stale.
+     */
+    private fun handOffPositionToServer(ourPosition: Duration) = lifecycleScope.launch {
+        val serverPosition = fetchServerPosition()
+        val difference = serverPosition?.let { it - ourPosition.inWholeSeconds }
+        Diag.log(
+            "local",
+            "hand-off check: server=$serverPosition ours=$ourPosition difference=$difference"
+        )
+        if (serverPosition == null || difference == null) return@launch
+        if (difference.absoluteValue > HAND_OFF_MAX_DIFFERENCE.inWholeSeconds) {
+            Diag.log("local", "position difference too large, keeping the server's position")
+            return@launch
+        }
+        Diag.log("local", "asking the server to continue at $ourPosition")
+        continuationUntil = SystemClock.elapsedRealtime() + SEEK_RESTART_WINDOW.inWholeMilliseconds
+        connectionHelper.updatePlaybackPosition(
+            slimproto.playerId,
+            ourPosition.inWholeSeconds.toInt()
+        )
+    }
+
+    private suspend fun fetchServerPosition(): Int? {
+        val position = connectionHelper.fetchPlaybackPositionSeconds(slimproto.playerId)
+        if (position == null) {
+            Diag.log("local", "could not fetch the server's position")
+        }
+        return position
+    }
 
     @androidx.annotation.OptIn(UnstableApi::class)
     private suspend fun sendStatus(type: SlimprotoSocket.StatusType) {
         val nowNanos = System.nanoTime()
         val elapsed = (nowNanos - startupTimestampNanos).toDuration(DurationUnit.NANOSECONDS)
         val (bufferFullness, bufferSize) = player.estimateBufferFullnessAndSize()
-        val position = player.determinePlaybackPosition(nowNanos)
+        val position = playerPosition(nowNanos)
         Diag.log(
             "local",
             "status=$type position=$position buffered=$bufferFullness/$bufferSize " +
@@ -375,12 +446,38 @@ class LocalPlaybackService :
             }
 
             is SlimprotoSocket.CommandPacket.StreamStart -> {
+                val previousPosition = playerPosition()
+                // A connection loss makes the server restart its stream for the track we were
+                // playing. That is a continuation of our stream, so keep counting from the
+                // position we had instead of restarting at zero - otherwise our position jumps
+                // backwards through the track. The same applies to the stream the server starts
+                // after we asked it to continue at our position.
+                val continuesCurrentStream = command.uri.toString() == currentStreamUri &&
+                    (streamInterrupted || SystemClock.elapsedRealtime() < continuationUntil)
+                // After a connection loss the server restarted its stream at the position it
+                // deduced on its own, which may be ahead of what we actually played, as it
+                // assumes we consumed everything it sent us. Ask it to continue at our position
+                // instead, after checking that this position is plausible.
+                val handOffPosition = streamInterrupted && continuesCurrentStream &&
+                    !positionHandedOff
                 Diag.log(
                     "local",
                     "strm-s uri=${command.uri} autoStart=${command.autoStart} " +
-                        "direct=${command.directStreaming} position=${playerPosition()}"
+                        "direct=${command.directStreaming} position=$previousPosition " +
+                        "continues=$continuesCurrentStream handOff=$handOffPosition"
                 )
+                continuationUntil = 0
+                positionHandedOff = handOffPosition
+                streamInterrupted = false
                 sendStatus(SlimprotoSocket.StatusType.Connecting)
+                currentStreamUri = command.uri.toString()
+                streamStartPosition =
+                    if (continuesCurrentStream) previousPosition else Duration.ZERO
+                if (handOffPosition) {
+                    handOffPositionToServer(streamStartPosition)
+                } else {
+                    alignPositionWithServer()
+                }
                 sentTrackStartStatus = false // new strm-s requires new STMs to be sent
                 sentBufferReady = command.autoStart
                 player.play(
@@ -474,6 +571,12 @@ class LocalPlaybackService :
 
     companion object {
         private const val TAG = "LocalPlaybackService"
+
+        /** Time within which the server's restart of a stream belongs to our seek request. */
+        private val SEEK_RESTART_WINDOW = 3.seconds
+
+        /** Largest plausible difference between our position and the server's one. */
+        private val HAND_OFF_MAX_DIFFERENCE = 20.seconds
 
         fun triggerStartOrStop(context: Context) {
             val serviceIntent = Intent(context, LocalPlaybackService::class.java)
