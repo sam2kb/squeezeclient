@@ -505,7 +505,7 @@ class SqueezeboxMediaPlayer(
         val lastPlayer = prefs.lastSessionPlayer
         val age = System.currentTimeMillis() - prefs.lastSessionTimestamp
         val resumable = prefs.resumePlayback && lastPlayer == playerId &&
-            prefs.lastSessionWasPlaying && age < SESSION_MAX_AGE.inWholeMilliseconds
+            age < SESSION_MAX_AGE.inWholeMilliseconds
         Diag.log(
             "resume",
             "resumable=$resumable player=$playerId lastPlayer=$lastPlayer " +
@@ -523,12 +523,26 @@ class SqueezeboxMediaPlayer(
         }
         resumeAttempted = true
         val position = prefs.lastSessionPosition
-        Diag.log("resume", "continuing playback at position $position")
+        val serverPosition = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
+        // The server's own position wins if it still knows it; our remembered one is only used
+        // when the position got lost (which is what happens when the player disconnects).
+        val seekNeeded = position > SESSION_MIN_POSITION.inWholeSeconds &&
+            serverPosition <= SESSION_MIN_POSITION.inWholeSeconds
+        // Restore the position in any case, so a paused session continues where it was left at
+        // when it gets played again.
+        val restartPlayback = prefs.lastSessionWasPlaying
+        Diag.log(
+            "resume",
+            "restoring position $position (server has $serverPosition, seek=$seekNeeded), " +
+                "restartPlayback=$restartPlayback"
+        )
         launch {
-            if (position > SESSION_MIN_POSITION.inWholeSeconds) {
+            if (seekNeeded) {
                 connectionHelper.updatePlaybackPosition(playerId, position)
             }
-            connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Playing)
+            if (restartPlayback) {
+                connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Playing)
+            }
         }
     }
 
