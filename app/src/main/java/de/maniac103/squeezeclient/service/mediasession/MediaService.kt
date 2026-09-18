@@ -22,6 +22,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.IBinder
+import android.os.SystemClock
+import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.core.content.IntentCompat
 import androidx.core.os.bundleOf
@@ -43,6 +45,7 @@ import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.ListenableFuture
+import de.maniac103.squeezeclient.Diag
 import de.maniac103.squeezeclient.R
 import de.maniac103.squeezeclient.cometd.ConnectionState
 import de.maniac103.squeezeclient.extfuncs.connectionHelper
@@ -73,11 +76,13 @@ class MediaService :
     private lateinit var mediaSession: MediaSession
     private var lastDisconnectionTime = Clock.System.now()
     private var delayedShutdownJob: Job? = null
+    private var lastSessionAnnouncement = 0L
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         dispatcher.onServicePreSuperOnCreate()
         super.onCreate()
+        Diag.log("session", "service created")
         player = SqueezeboxMediaPlayer(applicationContext, connectionHelper, lifecycle)
 
         val channelInfo = NotificationIds.CHANNEL_MEDIA_CONTROL
@@ -175,11 +180,54 @@ class MediaService :
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = mediaSession
 
+    /**
+     * Media keys from a device that isn't monitoring our session - or a play/pause key matching
+     * the state we already report - mean that the device's view of us is stale. The Bluetooth
+     * stack only re-reads a session when it re-evaluates its active sessions, which is what
+     * toggling Bluetooth effectively does, so re-announce the session then.
+     */
+    override fun onMediaButtonEvent(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        intent: Intent
+    ): Boolean {
+        val keyCode = IntentCompat
+            .getParcelableExtra(intent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+            ?.keyCode
+        val wantsPlay = when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY -> true
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> false
+            else -> null
+        }
+        val reportedPlaying = player.isPlaying
+        val keyContradictsUs = wantsPlay != null && wantsPlay == reportedPlaying &&
+            player.playbackState != Player.STATE_IDLE
+        val hasExternalController =
+            mediaSession.connectedControllers.any { it.packageName != packageName }
+        val announcementDue = SystemClock.elapsedRealtime() - lastSessionAnnouncement >
+            SESSION_ANNOUNCEMENT_DELAY
+        Diag.log(
+            "key",
+            "from=${controller.packageName} key=$keyCode reportedPlaying=$reportedPlaying " +
+                "playbackState=${player.playbackState} externalController=$hasExternalController"
+        )
+        if (controller.packageName != packageName && announcementDue &&
+            (keyContradictsUs || (!hasExternalController && reportedPlaying))
+        ) {
+            Diag.log("session", "device state is stale, re-announcing session")
+            lastSessionAnnouncement = SystemClock.elapsedRealtime()
+            removeSession(mediaSession)
+            addSession(mediaSession)
+        }
+        return false
+    }
+
     @OptIn(UnstableApi::class)
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo
     ): MediaSession.ConnectionResult {
+        Diag.log("session", "controller connected: ${controller.packageName}")
         val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
             .add(SessionCommand(SESSION_ACTION_POWER, Bundle.EMPTY))
             .add(SessionCommand(SESSION_ACTION_DISCONNECT, Bundle.EMPTY))
@@ -212,6 +260,7 @@ class MediaService :
     }
 
     private fun handleConnection(status: ConnectionState.Connected) {
+        Diag.log("conn", "connected, players=${status.players.map { it.id }}")
         // Update connection status first, because currentPlayer checked below
         // is updated on status changes
         player.isConnectedToServer = true
@@ -232,6 +281,7 @@ class MediaService :
     }
 
     private fun handleDisconnection() {
+        Diag.log("conn", "disconnected, wasConnected=${player.isConnectedToServer}")
         if (player.isConnectedToServer) {
             lastDisconnectionTime = Clock.System.now()
             player.isConnectedToServer = false
@@ -252,6 +302,9 @@ class MediaService :
 
         private const val SESSION_ACTION_POWER = "power"
         private const val SESSION_ACTION_DISCONNECT = "disconnect"
+
+        // Minimum time between two session re-announcements (see onMediaButtonEvent).
+        private const val SESSION_ANNOUNCEMENT_DELAY = 30000L
 
         fun start(context: Context, playerId: PlayerId, forcePlayerChange: Boolean) {
             val intent = Intent(context, MediaService::class.java).apply {

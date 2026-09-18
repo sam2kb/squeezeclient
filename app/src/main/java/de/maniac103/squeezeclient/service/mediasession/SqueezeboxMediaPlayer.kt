@@ -30,6 +30,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
+import de.maniac103.squeezeclient.Diag
 import de.maniac103.squeezeclient.cometd.ConnectionHelper
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.extfuncs.prefs
@@ -68,6 +69,7 @@ class SqueezeboxMediaPlayer(
         set(value) {
             if (field != value) {
                 field = value
+                Diag.log("player", "isConnectedToServer=$value")
                 updatePlayer(currentPlayer)
                 launch {
                     if (!value) {
@@ -112,6 +114,7 @@ class SqueezeboxMediaPlayer(
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean) = future {
+        Diag.log("cmd", "setPlayWhenReady($playWhenReady)")
         val playerId = currentPlayer ?: return@future
         val newState = when {
             playWhenReady -> PlayerStatus.PlayState.Playing
@@ -122,6 +125,7 @@ class SqueezeboxMediaPlayer(
     }
 
     override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int) = future {
+        Diag.log("cmd", "seek cmd=$seekCommand index=$mediaItemIndex posMs=$positionMs")
         val playerId = currentPlayer ?: return@future
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_NEXT -> {
@@ -159,6 +163,7 @@ class SqueezeboxMediaPlayer(
     }
 
     override fun handleStop() = future {
+        Diag.log("cmd", "stop")
         val playerId = currentPlayer ?: return@future
         updateUnacknowledgedState(playState = PlayerStatus.PlayState.Stopped)
         connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Stopped)
@@ -261,6 +266,16 @@ class SqueezeboxMediaPlayer(
         }
         playerState.muted?.let { builder.setIsDeviceMuted(it) }
 
+        Diag.log(
+            "getState",
+            "published=${Diag.song(currentSong)} index=$currentIndex items=${playlist.size} " +
+                "pbState=$playbackState playWhenReady=$playWhenReady " +
+                "song=${Diag.song(playerState.currentSong)} " +
+                "statusSong=${Diag.song(pendingPlayerState.status?.playlist?.nowPlaying)} " +
+                "playlistRev=${Diag.rev(playerState.playlist?.timestamp)} " +
+                "pending=${Diag.rev(pendingPlayerState.status?.playlist?.lastChange)} " +
+                "unack=$unacknowledgedChange"
+        )
         return builder.build()
     }
 
@@ -296,6 +311,7 @@ class SqueezeboxMediaPlayer(
             newPositionInTrack,
             newPlayState
         )
+        Diag.log("unack", "reporting $unacknowledgedStateChange until the server confirms")
         invalidateState()
 
         unacknowledgedStateRevertJob?.cancel()
@@ -328,6 +344,7 @@ class SqueezeboxMediaPlayer(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun updatePlayer(playerId: PlayerId?) {
+        Diag.log("player", "updatePlayer($playerId)")
         statusSubscription?.cancel()
         if (playerId == null || !isConnectedToServer) {
             return
@@ -344,15 +361,33 @@ class SqueezeboxMediaPlayer(
     private fun handlePlayerStatusUpdate(playerId: PlayerId, status: PlayerStatus) {
         val latestStatus = pendingPlayerState.status
         val newPlaylistTimestamp = status.playlist.lastChange
+        Diag.log(
+            "status",
+            "recv rev=${Diag.rev(newPlaylistTimestamp)} " +
+                "song=${Diag.song(status.playlist.nowPlaying)} " +
+                "idx=${status.playlist.currentPosition}/${status.playlist.trackCount} " +
+                "state=${status.playbackState} powered=${status.powered} " +
+                "vol=${status.currentVolume} muted=${status.muted} " +
+                "knownRev=${Diag.rev(latestStatus?.playlist?.lastChange)}"
+        )
         if (latestStatus != null && newPlaylistTimestamp < latestStatus.playlist.lastChange) {
             // The new status is older than what we already know about -> ignore it
+            val knownRev = Diag.rev(latestStatus.playlist.lastChange)
+            Diag.log("status", "-> dropped, older than $knownRev")
             return
         }
 
         if (status.playlist.lastChange != latestStatus?.playlist?.lastChange) {
             playlistFetchJob?.cancel()
+            Diag.log("playlist", "fetch start rev=${Diag.rev(status.playlist.lastChange)}")
             playlistFetchJob = lifecycle.coroutineScope.launch {
                 val playlist = connectionHelper.fetchPlaylist(playerId, PagingParams.All)
+                Diag.log(
+                    "playlist",
+                    "fetch done rev=${Diag.rev(playlist.timestamp)} " +
+                        "items=${playlist.items.size} index=${playlist.currentIndex} " +
+                        "wanted=${Diag.rev(status.playlist.lastChange)}"
+                )
                 if (playlist.timestamp == status.playlist.lastChange) {
                     pendingPlayerState.playlist = playlist
                     // Player state update is scheduled asynchronously so that the update method
@@ -380,11 +415,16 @@ class SqueezeboxMediaPlayer(
                 // Accept immediately if either
                 // - we don't have a state yet (don't wait for playlist)
                 // - or what we have looks consistent
+                Diag.log(
+                    "state",
+                    "apply immediately (consistent=${newPlayerState.isCompleteAndConsistent()})"
+                )
                 applyPlayerState(newPlayerState)
             }
 
             playlistFetchJob?.isActive == true -> {
                 // Playlist is currently being fetched; we'll come here again once that is done
+                Diag.log("state", "waiting for the playlist fetch")
             }
 
             else -> {
@@ -392,6 +432,7 @@ class SqueezeboxMediaPlayer(
                 // When we come here we have received a status update, fetched the playlist and
                 // the timestamps don't match. That means we'll likely get another status report
                 // which will trigger another playlist fetch.
+                Diag.log("state", "delaying apply by 500 ms (inconsistent data)")
                 delayedStateUpdateJob = lifecycle.coroutineScope.launch {
                     delay(500.milliseconds)
                     applyPlayerState(newPlayerState)
@@ -401,6 +442,13 @@ class SqueezeboxMediaPlayer(
     }
 
     private fun applyPlayerState(newPlayerState: PlayerState) {
+        Diag.log(
+            "state",
+            "applied song=${Diag.song(newPlayerState.currentSong)} " +
+                "idx=${newPlayerState.playlistPosition} " +
+                "state=${newPlayerState.playbackState} " +
+                "playlistRev=${Diag.rev(newPlayerState.playlist?.timestamp)}"
+        )
         playerState = newPlayerState
         unacknowledgedStateChange = null
         unacknowledgedStateRevertJob?.cancel()

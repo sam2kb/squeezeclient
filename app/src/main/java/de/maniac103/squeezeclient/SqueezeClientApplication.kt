@@ -64,6 +64,7 @@ class SqueezeClientApplication :
         DynamicColors.applyToActivitiesIfAvailable(this)
         super.onCreate()
         PermissionRequester.initialize(this)
+        Diag.init(this)
 
         // Don't use a lambda here, it might be garbage collected
         // (internally, listeners are stored in a WeakHashMap)
