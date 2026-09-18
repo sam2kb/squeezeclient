@@ -71,6 +71,9 @@ class SqueezeboxMediaPlayer(
         set(value) {
             if (field != value) {
                 field = value
+                // A new player gets a fresh chance to continue its last session; connection
+                // blips for the same player don't (see resumeLastSession).
+                resumeAttempted = false
                 updatePlayer(value)
             }
         }
@@ -357,7 +360,6 @@ class SqueezeboxMediaPlayer(
     private fun updatePlayer(playerId: PlayerId?) {
         Diag.log("player", "updatePlayer($playerId)")
         statusSubscriptionStartTime = SystemClock.elapsedRealtime()
-        resumeAttempted = false
         statusSubscription?.cancel()
         if (playerId == null || !isConnectedToServer) {
             return
@@ -479,6 +481,8 @@ class SqueezeboxMediaPlayer(
         if (state.playbackState == PlayerStatus.PlayState.Playing) {
             val position = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
             appContext.prefs.edit { putLastSession(playerId, position, true) }
+            // Something is playing in this app run, so there is nothing to resume anymore
+            resumeAttempted = true
             return
         }
         // Ignore what the server reports right after (re)connecting: it may still report the
@@ -523,25 +527,23 @@ class SqueezeboxMediaPlayer(
         }
         resumeAttempted = true
         val position = prefs.lastSessionPosition
-        val serverPosition = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
-        // The server's own position wins if it still knows it; our remembered one is only used
-        // when the position got lost (which is what happens when the player disconnects).
-        val seekNeeded = position > SESSION_MIN_POSITION.inWholeSeconds &&
-            serverPosition <= SESSION_MIN_POSITION.inWholeSeconds
-        // Restore the position in any case, so a paused session continues where it was left at
-        // when it gets played again.
+        // The server's own position is not necessarily used for the stream it starts next, so
+        // seek explicitly: immediately for a paused session, after playback was started
+        // otherwise (where the seek needs a running stream to apply to).
         val restartPlayback = prefs.lastSessionWasPlaying
         Diag.log(
             "resume",
-            "restoring position $position (server has $serverPosition, seek=$seekNeeded), " +
-                "restartPlayback=$restartPlayback"
+            "restoring position $position, restartPlayback=$restartPlayback"
         )
         launch {
-            if (seekNeeded) {
-                connectionHelper.updatePlaybackPosition(playerId, position)
-            }
             if (restartPlayback) {
                 connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Playing)
+            }
+            if (position > SESSION_MIN_POSITION.inWholeSeconds) {
+                if (restartPlayback) {
+                    delay(SESSION_SEEK_DELAY)
+                }
+                connectionHelper.updatePlaybackPosition(playerId, position)
             }
         }
     }
@@ -599,6 +601,10 @@ class SqueezeboxMediaPlayer(
 
         // Don't resume positions very close to the start of a track.
         private val SESSION_MIN_POSITION = 5.seconds
+
+        // Time to wait after starting playback before seeking to the resumed position; the seek
+        // needs a running stream to apply to.
+        private val SESSION_SEEK_DELAY = 2.seconds
 
         // Grace period after (re)connecting during which reported state is not remembered; the
         // server may still report the player as stopped before restoring its previous state.

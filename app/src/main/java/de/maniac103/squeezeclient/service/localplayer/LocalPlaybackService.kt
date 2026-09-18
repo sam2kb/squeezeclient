@@ -41,6 +41,7 @@ import androidx.work.Constraints
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
+import de.maniac103.squeezeclient.Diag
 import de.maniac103.squeezeclient.R
 import de.maniac103.squeezeclient.extfuncs.getOrCreateNotificationChannel
 import de.maniac103.squeezeclient.extfuncs.localPlayerEnabled
@@ -323,17 +324,26 @@ class LocalPlaybackService :
         )
     }
 
+    private fun playerPosition(): kotlin.time.Duration =
+        player.determinePlaybackPosition(System.nanoTime())
+
     @androidx.annotation.OptIn(UnstableApi::class)
     private suspend fun sendStatus(type: SlimprotoSocket.StatusType) {
         val nowNanos = System.nanoTime()
         val elapsed = (nowNanos - startupTimestampNanos).toDuration(DurationUnit.NANOSECONDS)
         val (bufferFullness, bufferSize) = player.estimateBufferFullnessAndSize()
+        val position = player.determinePlaybackPosition(nowNanos)
+        Diag.log(
+            "local",
+            "status=$type position=$position buffered=$bufferFullness/$bufferSize " +
+                "ready=${player.readyForPlayback} playing=${player.isPlaying}"
+        )
 
         slimproto.sendStatus(
             type,
             elapsed,
             player.readyForPlayback,
-            player.determinePlaybackPosition(nowNanos),
+            position,
             player.totalTransferredBytes,
             bufferFullness,
             bufferSize
@@ -365,6 +375,11 @@ class LocalPlaybackService :
             }
 
             is SlimprotoSocket.CommandPacket.StreamStart -> {
+                Diag.log(
+                    "local",
+                    "strm-s uri=${command.uri} autoStart=${command.autoStart} " +
+                        "direct=${command.directStreaming} position=${playerPosition()}"
+                )
                 sendStatus(SlimprotoSocket.StatusType.Connecting)
                 sentTrackStartStatus = false // new strm-s requires new STMs to be sent
                 sentBufferReady = command.autoStart
@@ -380,6 +395,7 @@ class LocalPlaybackService :
             }
 
             is SlimprotoSocket.CommandPacket.StreamPause -> {
+                Diag.log("local", "strm-p position=${playerPosition()}")
                 player.paused = true
                 if (command.pauseInterval != null) {
                     delay(command.pauseInterval)
@@ -393,6 +409,10 @@ class LocalPlaybackService :
                 val uptime = (System.nanoTime() - startupTimestampNanos)
                     .toDuration(DurationUnit.NANOSECONDS)
                 val unpauseDelay = command.unpauseTimestamp - uptime
+                Diag.log(
+                    "local",
+                    "strm-u delay=$unpauseDelay position=${playerPosition()}"
+                )
                 if (unpauseDelay.isPositive()) {
                     Log.d(TAG, "Delaying unpause for $unpauseDelay ms")
                     delay(unpauseDelay)
@@ -403,10 +423,15 @@ class LocalPlaybackService :
             }
 
             is SlimprotoSocket.CommandPacket.StreamSkipAhead -> {
+                Diag.log(
+                    "local",
+                    "strm-a skip=${command.skipOverInterval} position=${playerPosition()}"
+                )
                 player.skipAhead(command.skipOverInterval)
             }
 
             is SlimprotoSocket.CommandPacket.StreamStop -> {
+                Diag.log("local", "strm-t position=${playerPosition()}")
                 player.stop()
             }
 
