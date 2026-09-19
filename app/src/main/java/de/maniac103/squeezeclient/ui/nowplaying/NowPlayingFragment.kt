@@ -19,6 +19,7 @@ package de.maniac103.squeezeclient.ui.nowplaying
 
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.format.DateUtils
 import android.view.Menu
 import android.view.MenuInflater
@@ -41,6 +42,7 @@ import coil3.request.fallback
 import coil3.size.Size
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.slider.LabelFormatter
+import com.google.android.material.slider.Slider
 import de.maniac103.squeezeclient.R
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.databinding.FragmentNowplayingBinding
@@ -60,6 +62,7 @@ import de.maniac103.squeezeclient.model.SlimBrowseItemList
 import de.maniac103.squeezeclient.ui.bottomsheets.InputBottomSheetFragment
 import de.maniac103.squeezeclient.ui.common.ViewBindingFragment
 import de.maniac103.squeezeclient.ui.contextmenu.ContextMenuBottomSheetFragment
+import kotlin.math.absoluteValue
 import kotlin.math.max
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -102,6 +105,13 @@ class NowPlayingFragment :
     private var currentSongUrl: String? = null
     private var currentSongTitle: String? = null
     private var currentSongIsFavorite: Boolean? = null
+
+    /** Whether the user currently moves the slider; status updates must not move it then. */
+    private var userSeeking = false
+
+    /** Position the user seeked to, until the position reported by the server catches up. */
+    private var pendingSeekPosition: Float? = null
+    private var pendingSeekTimestamp = 0L
 
     private val onBackPressedCallback = object : OnBackPressedCallback(false) {
         private var startedCollapse = false
@@ -243,14 +253,28 @@ class NowPlayingFragment :
         binding.progressSlider.apply {
             labelBehavior = LabelFormatter.LABEL_GONE
             valueFrom = 0F
+            addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+                override fun onStartTrackingTouch(slider: Slider) {
+                    userSeeking = true
+                }
+
+                override fun onStopTrackingTouch(slider: Slider) {
+                    userSeeking = false
+                    sliderDragUpdateJob?.cancel()
+                    lifecycleScope.launch {
+                        seekTo(slider.value)
+                    }
+                }
+            })
             addOnChangeListener { _, value, fromUser ->
                 binding.elapsedTime.text = DateUtils.formatElapsedTime(value.toLong())
                 if (fromUser) {
+                    // Touching the slider is the normal case and handled when the touch ends;
+                    // this also catches changes from keyboard or accessibility actions.
                     sliderDragUpdateJob?.cancel()
                     sliderDragUpdateJob = lifecycleScope.launch {
                         delay(200.milliseconds)
-                        timeUpdateJob?.cancel()
-                        connectionHelper.updatePlaybackPosition(playerId, value.toInt())
+                        seekTo(value)
                     }
                 }
             }
@@ -575,7 +599,10 @@ class NowPlayingFragment :
                 valueTo = duration
                 // The server-reported position can exceed the song duration (e.g. when the
                 // track end is reached) or be negative; Slider doesn't accept such values.
-                value = position.coerceIn(0F, duration)
+                val newValue = position.coerceIn(0F, duration)
+                if (canApplyPosition(newValue)) {
+                    value = newValue
+                }
                 isEnabled = status.playbackState != PlayerStatus.PlayState.Stopped
             }
             binding.progressMinimized.apply {
@@ -593,8 +620,11 @@ class NowPlayingFragment :
                         // Duration is a float, but we increment in full seconds, thus it can happen
                         // the calculated position becomes larger than the end position, which Slider
                         // does not like.
-                        binding.progressSlider.value =
-                            positionSeconds.toFloat().coerceIn(0F, binding.progressSlider.valueTo)
+                        val newValue = positionSeconds.toFloat()
+                            .coerceIn(0F, binding.progressSlider.valueTo)
+                        if (canApplyPosition(newValue)) {
+                            binding.progressSlider.value = newValue
+                        }
                         binding.progressMinimized.progress = positionSeconds.toInt()
                     }
                 }
@@ -678,7 +708,38 @@ class NowPlayingFragment :
 
     private fun sheetIsExpanded() = binding.container.currentState == R.id.expanded
 
+    /**
+     * Sends a seek request and keeps the slider at the requested position until the server
+     * reports a position close to it - otherwise the status updates arriving in between would
+     * move the slider back to where playback currently is.
+     */
+    private suspend fun seekTo(positionSeconds: Float) {
+        pendingSeekPosition = positionSeconds
+        pendingSeekTimestamp = SystemClock.elapsedRealtime()
+        connectionHelper.updatePlaybackPosition(playerId, positionSeconds.toInt())
+    }
+
+    /** Whether the slider may be moved to the given position. */
+    private fun canApplyPosition(newValue: Float): Boolean {
+        if (userSeeking) {
+            return false
+        }
+        val pending = pendingSeekPosition ?: return true
+        val settled = (newValue - pending).absoluteValue <= SLIDER_SETTLE_TOLERANCE ||
+            SystemClock.elapsedRealtime() - pendingSeekTimestamp > SLIDER_SETTLE_TIMEOUT_MS
+        if (settled) {
+            pendingSeekPosition = null
+        }
+        return settled
+    }
+
     companion object {
+        /** Position difference within which a status update is considered to reflect our seek. */
+        private const val SLIDER_SETTLE_TOLERANCE = 3F
+
+        /** Time after which a pending seek is given up on, in milliseconds. */
+        private const val SLIDER_SETTLE_TIMEOUT_MS = 5_000L
+
         fun create(playerId: PlayerId) = NowPlayingFragment().apply {
             arguments = Bundle().apply {
                 putParcelable("playerId", playerId)
