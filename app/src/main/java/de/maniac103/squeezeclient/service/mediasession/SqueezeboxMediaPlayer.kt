@@ -125,12 +125,18 @@ class SqueezeboxMediaPlayer(
         val playerId = currentPlayer ?: return@future
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_NEXT -> {
-                updateUnacknowledgedState(playlistPositionOffset = 1)
+                updateUnacknowledgedState(
+                    playlistPositionOffset = 1,
+                    song = songAtOffset(1)
+                )
                 connectionHelper.sendButtonRequest(PlaybackButtonRequest.NextTrack(playerId))
             }
 
             COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS -> {
-                updateUnacknowledgedState(playlistPositionOffset = -1)
+                updateUnacknowledgedState(
+                    playlistPositionOffset = -1,
+                    song = songAtOffset(-1)
+                )
                 connectionHelper.sendButtonRequest(
                     PlaybackButtonRequest.PreviousTrack(playerId)
                 )
@@ -167,7 +173,7 @@ class SqueezeboxMediaPlayer(
     override fun getState(): State {
         val playerState = playerState
             ?: return waitingForPlayerState()
-        val currentSong = playerState.currentSong
+        val currentSong = unacknowledgedStateChange?.song ?: playerState.currentSong
             ?: return State.Builder().setPlaybackState(STATE_IDLE).build()
         val unacknowledgedChange = unacknowledgedStateChange
 
@@ -225,13 +231,16 @@ class SqueezeboxMediaPlayer(
             }
         }
 
-        val playWhenReady = playerState.playbackState == PlayerStatus.PlayState.Playing
+        // Report the state we are acting on rather than the server's: a press takes effect
+        // immediately, and a status that is still in flight must not flip the button back.
+        val reportedPlayState = unacknowledgedChange?.playState ?: playerState.playbackState
+        val playWhenReady = reportedPlayState == PlayerStatus.PlayState.Playing
         val playbackState = when {
             !isConnectedToServer -> STATE_BUFFERING
 
             !playerState.powered -> STATE_IDLE
 
-            else -> when (unacknowledgedChange?.playState ?: playerState.playbackState) {
+            else -> when (reportedPlayState) {
                 PlayerStatus.PlayState.Playing -> STATE_READY
                 PlayerStatus.PlayState.Paused -> STATE_READY
                 PlayerStatus.PlayState.Stopped -> STATE_IDLE
@@ -264,13 +273,27 @@ class SqueezeboxMediaPlayer(
         return builder.build()
     }
 
+    /**
+     * The song a relative playlist move leads to, as far as we know it. Track changes should show
+     * the new song right away: until the server confirms them, the previous song (whose playlist
+     * revision is still current) would otherwise be reported for a moment, which makes head units
+     * flip back to it and then forward again.
+     */
+    private fun songAtOffset(offset: Int): Playlist.PlaylistItem? {
+        val state = playerState ?: return null
+        val playlist = state.playlist ?: return null
+        return playlist.items.getOrNull(state.playlistPosition + offset)
+    }
+
     private fun updateUnacknowledgedState(
         absolutePlaylistPosition: Int? = null,
         playlistPositionOffset: Int? = null,
         positionInTrack: Duration? = null,
-        playState: PlayerStatus.PlayState? = null
+        playState: PlayerStatus.PlayState? = null,
+        song: Playlist.PlaylistItem? = null
     ) {
         val newPlayState = playState ?: unacknowledgedStateChange?.playState
+        val newSong = song ?: unacknowledgedStateChange?.song
         val newPositionInTrack = positionInTrack ?: unacknowledgedStateChange?.positionInTrack
         val newAbsolutePosition = absolutePlaylistPosition
             ?: unacknowledgedStateChange?.absolutePlaylistPosition
@@ -294,7 +317,8 @@ class SqueezeboxMediaPlayer(
                 ?.coerceIn(0, playlistLength),
             newOffset?.coerceIn(0, playlistLength),
             newPositionInTrack,
-            newPlayState
+            newPlayState,
+            newSong
         )
         invalidateState()
 
@@ -401,9 +425,18 @@ class SqueezeboxMediaPlayer(
     }
 
     private fun applyPlayerState(newPlayerState: PlayerState) {
+        val pending = unacknowledgedStateChange
         playerState = newPlayerState
-        unacknowledgedStateChange = null
-        unacknowledgedStateRevertJob?.cancel()
+        // Keep reporting what we asked for until the server's state shows it; statuses for the
+        // still-current previous revision arrive in between and would flip the metadata and the
+        // play state back to the old values.
+        val songConfirmed = pending?.song == null || newPlayerState.currentSong == pending.song
+        val playStateConfirmed =
+            pending?.playState == null || newPlayerState.playbackState == pending.playState
+        if (pending == null || (songConfirmed && playStateConfirmed)) {
+            unacknowledgedStateChange = null
+            unacknowledgedStateRevertJob?.cancel()
+        }
         invalidateState()
     }
 
@@ -451,6 +484,7 @@ class SqueezeboxMediaPlayer(
         val absolutePlaylistPosition: Int? = null,
         val playlistPositionOffset: Int? = null,
         val positionInTrack: Duration? = null,
-        val playState: PlayerStatus.PlayState? = null
+        val playState: PlayerStatus.PlayState? = null,
+        val song: Playlist.PlaylistItem? = null
     )
 }
