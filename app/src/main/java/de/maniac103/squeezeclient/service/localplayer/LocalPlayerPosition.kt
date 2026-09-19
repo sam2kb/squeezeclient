@@ -12,8 +12,27 @@ object LocalPlayerPosition {
     @Volatile
     private var current: Pair<PlayerId, Duration>? = null
 
-    /** The position the given player is playing at, if we play it ourselves. */
-    fun forPlayer(playerId: PlayerId?): Duration? = current?.takeIf { it.first == playerId }?.second
+    @Volatile
+    private var songDuration: Duration? = null
+
+    /**
+     * The position the given player is playing at, if we play it ourselves. Never beyond the
+     * song's end: a stream can play longer than the song (e.g. when the server appended the next
+     * track to it), and reporting such a position confuses both the server and the UI.
+     */
+    fun forPlayer(playerId: PlayerId?): Duration? =
+        current?.takeIf { it.first == playerId }?.second?.let { position ->
+            songDuration?.let { position.coerceIn(Duration.ZERO, it) } ?: position
+        }
+
+    /** Clamps a position to the song's duration, so nothing reports a position past its end. */
+    fun clamp(position: Duration): Duration =
+        songDuration?.let { position.coerceIn(Duration.ZERO, it) } ?: position
+
+    /** Duration of the song currently being played, as reported by the server. */
+    fun updateDuration(duration: Duration?) {
+        songDuration = duration
+    }
 
     fun update(playerId: PlayerId, position: Duration) {
         current = playerId to position

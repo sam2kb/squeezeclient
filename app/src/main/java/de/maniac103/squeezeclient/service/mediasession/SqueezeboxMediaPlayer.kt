@@ -49,6 +49,7 @@ import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
 import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
+import de.maniac103.squeezeclient.service.localplayer.PositionChangeRequests
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
@@ -150,11 +151,13 @@ class SqueezeboxMediaPlayer(
         val playerId = currentPlayer ?: return@future
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_NEXT -> {
+                PositionChangeRequests.note()
                 updateUnacknowledgedState(playlistPositionOffset = 1)
                 connectionHelper.sendButtonRequest(PlaybackButtonRequest.NextTrack(playerId))
             }
 
             COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS -> {
+                PositionChangeRequests.note()
                 updateUnacknowledgedState(playlistPositionOffset = -1)
                 connectionHelper.sendButtonRequest(
                     PlaybackButtonRequest.PreviousTrack(playerId)
@@ -466,6 +469,7 @@ class SqueezeboxMediaPlayer(
     }
 
     private fun applyPlayerState(newPlayerState: PlayerState) {
+        LocalPlayerPosition.updateDuration(newPlayerState.currentSongDuration)
         Diag.log(
             "state",
             "applied song=${Diag.song(newPlayerState.currentSong)} " +

@@ -58,6 +58,7 @@ import de.maniac103.squeezeclient.ui.prefs.SettingsActivity
 import kotlin.math.absoluteValue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 import kotlin.time.ExperimentalTime
@@ -101,6 +102,9 @@ class LocalPlaybackService :
 
     /** Elapsed realtime until which a stream restarted by the server still continues our stream. */
     private var continuationUntil = 0L
+
+    /** Whether the next stream the server starts resumes the track we are paused in. */
+    private var streamResumesAfterPause = false
     override fun onCreate() {
         dispatcher.onServicePreSuperOnCreate()
         super.onCreate()
@@ -339,7 +343,9 @@ class LocalPlaybackService :
     }
 
     private fun playerPosition(nowNanos: Long = System.nanoTime()): Duration =
-        streamStartPosition + player.determinePlaybackPosition(nowNanos)
+        LocalPlayerPosition.clamp(
+            streamStartPosition + player.determinePlaybackPosition(nowNanos)
+        )
 
     /**
      * Adopt the position the server assumes the player to be at as our starting point, as the
@@ -399,6 +405,8 @@ class LocalPlaybackService :
                     slimproto.playerId,
                     ourPosition.inWholeSeconds.toInt()
                 )
+                // Our own request must not make the restart look server-controlled.
+                PositionChangeRequests.clear()
                 return@launch
             }
             delay(HAND_OFF_RETRY_DELAY)
@@ -466,8 +474,13 @@ class LocalPlaybackService :
                 val previousPosition = playerPosition()
                 // The server restarts its stream on a connection loss; that continues our
                 // stream, so keep counting from our position instead of restarting at zero.
-                val continuesCurrentStream = command.uri.toString() == currentStreamUri &&
-                    (streamInterrupted || SystemClock.elapsedRealtime() < continuationUntil)
+                // A stream the server starts right after we asked for a different position or
+                // track plays what the server chose - everything else continues our track.
+                val continuesCurrentStream = !PositionChangeRequests.isRecent() &&
+                    command.uri.toString() == currentStreamUri && (
+                        streamInterrupted || streamResumesAfterPause ||
+                            SystemClock.elapsedRealtime() < continuationUntil
+                        )
                 // The server resumes at the position it deduced itself, which is ahead of what
                 // we played (it assumes we consumed all it sent); ask it to use ours instead.
                 val handOffPosition = streamInterrupted && continuesCurrentStream
@@ -477,12 +490,24 @@ class LocalPlaybackService :
                         "direct=${command.directStreaming} position=$previousPosition " +
                         "continues=$continuesCurrentStream handOff=$handOffPosition"
                 )
-                continuationUntil = 0
+                // Server-initiated restarts can arrive in bursts; keep treating them as one
+                // continuation, so the position stays continuous across the whole burst.
+                continuationUntil = if (continuesCurrentStream) {
+                    SystemClock.elapsedRealtime() + SEEK_RESTART_WINDOW.inWholeMilliseconds
+                } else {
+                    0
+                }
                 streamInterrupted = false
+                streamResumesAfterPause = false
                 sendStatus(SlimprotoSocket.StatusType.Connecting)
                 currentStreamUri = command.uri.toString()
-                streamStartPosition =
-                    if (continuesCurrentStream) previousPosition else Duration.ZERO
+                // Part of the stream may already have been played; subtracting that keeps our
+                // position continuous whether or not the server restarted the player with it.
+                streamStartPosition = if (continuesCurrentStream) {
+                    previousPosition - player.determinePlaybackPosition(System.nanoTime())
+                } else {
+                    Duration.ZERO
+                }
                 if (handOffPosition) {
                     handOffPositionToServer(previousPosition)
                 } else if (!continuesCurrentStream) {
@@ -504,6 +529,7 @@ class LocalPlaybackService :
 
             is SlimprotoSocket.CommandPacket.StreamPause -> {
                 Diag.log("local", "strm-p position=${playerPosition()}")
+                streamResumesAfterPause = true
                 player.paused = true
                 if (command.pauseInterval != null) {
                     delay(command.pauseInterval)
@@ -514,6 +540,7 @@ class LocalPlaybackService :
             }
 
             is SlimprotoSocket.CommandPacket.StreamUnpause -> {
+                streamResumesAfterPause = true
                 val uptime = (System.nanoTime() - startupTimestampNanos)
                     .toDuration(DurationUnit.NANOSECONDS)
                 val unpauseDelay = command.unpauseTimestamp - uptime
@@ -586,8 +613,12 @@ class LocalPlaybackService :
         /** Position difference below which the server's position is left alone. */
         private val HAND_OFF_MIN_DIFFERENCE = 5.seconds
 
-        /** Maximum difference between our and the server's position that is still handed over. */
-        private val HAND_OFF_MAX_DIFFERENCE = 60.seconds
+        /**
+         * Maximum difference between our and the server's position that is still handed over. It
+         * can legitimately be large: the server pauses its own position when the connection drops
+         * while we keep playing from the buffer, so the difference grows with every interruption.
+         */
+        private val HAND_OFF_MAX_DIFFERENCE = 10.minutes
 
         /** How often the hand-off is retried when the server cannot be queried yet. */
         private const val HAND_OFF_ATTEMPTS = 10
