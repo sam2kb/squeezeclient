@@ -47,6 +47,7 @@ import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
+import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
@@ -262,6 +263,8 @@ class SqueezeboxMediaPlayer(
             .setAvailableCommands(commandsBuilder.build())
             .setContentPositionMs(
                 unacknowledgedChange?.positionInTrack?.inWholeMilliseconds
+                    ?: LocalPlayerPosition.forPlayer(currentPlayer)
+                        ?.toLong(DurationUnit.MILLISECONDS)
                     ?: playerState.currentPlayPosition?.toLong(DurationUnit.MILLISECONDS)
                     ?: C.TIME_UNSET
             )

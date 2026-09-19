@@ -61,9 +61,11 @@ import de.maniac103.squeezeclient.model.Playlist
 import de.maniac103.squeezeclient.model.SlimBrowseItemList
 import de.maniac103.squeezeclient.ui.bottomsheets.InputBottomSheetFragment
 import de.maniac103.squeezeclient.ui.common.ViewBindingFragment
+import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
 import de.maniac103.squeezeclient.ui.contextmenu.ContextMenuBottomSheetFragment
 import kotlin.math.absoluteValue
 import kotlin.math.max
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
@@ -108,6 +110,9 @@ class NowPlayingFragment :
 
     /** Whether the user currently moves the slider; status updates must not move it then. */
     private var userSeeking = false
+
+    /** When the user last touched or moved the slider, to recover from a lost touch end event. */
+    private var lastSeekInputTimestamp = 0L
 
     /** Position the user seeked to, until the position reported by the server catches up. */
     private var pendingSeekPosition: Float? = null
@@ -256,6 +261,7 @@ class NowPlayingFragment :
             addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
                 override fun onStartTrackingTouch(slider: Slider) {
                     userSeeking = true
+                    lastSeekInputTimestamp = SystemClock.elapsedRealtime()
                 }
 
                 override fun onStopTrackingTouch(slider: Slider) {
@@ -269,6 +275,7 @@ class NowPlayingFragment :
             addOnChangeListener { _, value, fromUser ->
                 binding.elapsedTime.text = DateUtils.formatElapsedTime(value.toLong())
                 if (fromUser) {
+                    lastSeekInputTimestamp = SystemClock.elapsedRealtime()
                     // Touching the slider is the normal case and handled when the touch ends;
                     // this also catches changes from keyboard or accessibility actions.
                     sliderDragUpdateJob?.cancel()
@@ -554,6 +561,13 @@ class NowPlayingFragment :
     }
 
     @OptIn(ExperimentalTime::class)
+    /**
+     * Position to display: the local player's own position when we play ourselves - the
+     * server's position model drifts from what is actually played on stream restarts.
+     */
+    private fun displayPosition(status: PlayerStatus) =
+        LocalPlayerPosition.forPlayer(playerId) ?: status.currentPlayPosition
+
     private fun update(status: PlayerStatus) {
         val currentSong = status.playlist.nowPlaying
 
@@ -595,7 +609,7 @@ class NowPlayingFragment :
                     0.1F
                 )
                 val position =
-                    status.currentPlayPosition?.toDouble(DurationUnit.SECONDS)?.toFloat() ?: 0F
+                    displayPosition(status)?.toDouble(DurationUnit.SECONDS)?.toFloat() ?: 0F
                 valueTo = duration
                 // The server-reported position can exceed the song duration (e.g. when the
                 // track end is reached) or be negative; Slider doesn't accept such values.
@@ -607,7 +621,7 @@ class NowPlayingFragment :
             }
             binding.progressMinimized.apply {
                 max = status.currentSongDuration.toInt(DurationUnit.SECONDS)
-                progress = status.currentPlayPosition?.toInt(DurationUnit.SECONDS) ?: 0
+                progress = displayPosition(status)?.toInt(DurationUnit.SECONDS) ?: 0
             }
             binding.totalTime.text =
                 DateUtils.formatElapsedTime(status.currentSongDuration.toLong(DurationUnit.SECONDS))
@@ -616,16 +630,16 @@ class NowPlayingFragment :
                 timeUpdateJob = lifecycleScope.launch {
                     while (true) {
                         delay(1.seconds)
-                        val positionSeconds = status.currentPlayPosition?.inWholeSeconds ?: 0F
-                        // Duration is a float, but we increment in full seconds, thus it can happen
-                        // the calculated position becomes larger than the end position, which Slider
-                        // does not like.
-                        val newValue = positionSeconds.toFloat()
+                        // Use the interpolated position, not whole seconds: the status updates
+                        // write fractional positions, and rounding here would move the slider
+                        // backwards every second.
+                        val position = displayPosition(status) ?: Duration.ZERO
+                        val newValue = position.toDouble(DurationUnit.SECONDS).toFloat()
                             .coerceIn(0F, binding.progressSlider.valueTo)
                         if (canApplyPosition(newValue)) {
                             binding.progressSlider.value = newValue
                         }
-                        binding.progressMinimized.progress = positionSeconds.toInt()
+                        binding.progressMinimized.progress = position.inWholeSeconds.toInt()
                     }
                 }
             }
@@ -721,7 +735,7 @@ class NowPlayingFragment :
 
     /** Whether the slider may be moved to the given position. */
     private fun canApplyPosition(newValue: Float): Boolean {
-        if (userSeeking) {
+        if (isUserSeeking()) {
             return false
         }
         val pending = pendingSeekPosition ?: return true
@@ -733,12 +747,22 @@ class NowPlayingFragment :
         return settled
     }
 
+    /**
+     * Whether the user is moving the slider right now. A touch that never reported its end (e.g.
+     * because the gesture was cancelled) must not block updates forever, hence the timeout.
+     */
+    private fun isUserSeeking() = userSeeking &&
+        SystemClock.elapsedRealtime() - lastSeekInputTimestamp < SLIDER_INPUT_TIMEOUT_MS
+
     companion object {
         /** Position difference within which a status update is considered to reflect our seek. */
         private const val SLIDER_SETTLE_TOLERANCE = 3F
 
         /** Time after which a pending seek is given up on, in milliseconds. */
         private const val SLIDER_SETTLE_TIMEOUT_MS = 5_000L
+
+        /** Time after which a drag without input is considered finished, in milliseconds. */
+        private const val SLIDER_INPUT_TIMEOUT_MS = 10_000L
 
         fun create(playerId: PlayerId) = NowPlayingFragment().apply {
             arguments = Bundle().apply {
