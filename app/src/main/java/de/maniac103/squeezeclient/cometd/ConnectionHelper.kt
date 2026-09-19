@@ -74,6 +74,7 @@ import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.SlimBrowseItemList
+import de.maniac103.squeezeclient.service.localplayer.PositionChangeRequests
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CancellationException
@@ -321,8 +322,21 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
         publishOneShotRequest(PlayerPowerRequest(playerId, on))
     suspend fun sendButtonRequest(request: PlaybackButtonRequest) = publishOneShotRequest(request)
 
-    suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) =
+    suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) {
+        PositionChangeRequests.note(positionSeconds)
         publishOneShotRequest(SetPlaybackPositionRequest(playerId, positionSeconds))
+    }
+
+    /**
+     * The position (in seconds) the server assumes the player to be at, or null if it
+     * does not know (no connection) or the position is meaningless (not playing).
+     */
+    suspend fun fetchPlaybackPositionSeconds(playerId: PlayerId): Int? = runCatching {
+        val status = doRequestWithResult<PlayerStatusResponse>(PlayerStatusRequest(playerId))
+        status.playPosition
+            .takeIf { status.state == PlayerStatus.PlayState.Playing }
+            ?.toInt()
+    }.getOrNull()
 
     suspend fun getLocalLibrarySearchResultCounts(
         searchTerm: String
