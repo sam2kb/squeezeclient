@@ -38,6 +38,7 @@ import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
+import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -243,6 +244,8 @@ class SqueezeboxMediaPlayer(
             .setAvailableCommands(commandsBuilder.build())
             .setContentPositionMs(
                 unacknowledgedChange?.positionInTrack?.inWholeMilliseconds
+                    ?: LocalPlayerPosition.forPlayer(currentPlayer)
+                        ?.toLong(DurationUnit.MILLISECONDS)
                     ?: playerState.currentPlayPosition?.toLong(DurationUnit.MILLISECONDS)
                     ?: C.TIME_UNSET
             )
@@ -401,6 +404,11 @@ class SqueezeboxMediaPlayer(
     }
 
     private fun applyPlayerState(newPlayerState: PlayerState) {
+        LocalPlayerPosition.updateDuration(newPlayerState.currentSongDuration)
+        val previousSong = playerState?.currentSong
+        if (previousSong != null && previousSong != newPlayerState.currentSong) {
+            LocalPlayerPosition.noteSongChanged()
+        }
         playerState = newPlayerState
         unacknowledgedStateChange = null
         unacknowledgedStateRevertJob?.cancel()
