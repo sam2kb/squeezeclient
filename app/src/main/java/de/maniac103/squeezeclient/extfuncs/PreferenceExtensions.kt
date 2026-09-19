@@ -131,6 +131,16 @@ fun SharedPreferences.Editor.putLastSelectedPlayer(playerId: PlayerId) {
     putString("active_player", playerId.id)
 }
 
+/** MAC address the local player reports to the server, derived from the device identifier. */
+val SharedPreferences.localPlayerMac: ByteArray
+    get() = ByteArray(6) { i ->
+        getOrCreateDeviceIdentifier().leastSignificantBits.shr(i * 8).toByte()
+    }
+
+/** Player id of the local player, as the server knows it. */
+val SharedPreferences.localPlayerId: PlayerId
+    get() = PlayerId(localPlayerMac.joinToString(":") { "%02x".format(it) })
+
 fun SharedPreferences.getOrCreateDeviceIdentifier(): UUID {
     val existing = getString("device_identifier", null)
     if (existing != null) {

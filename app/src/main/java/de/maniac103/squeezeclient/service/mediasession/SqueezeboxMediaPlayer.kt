@@ -39,6 +39,7 @@ import de.maniac103.squeezeclient.extfuncs.lastSessionPlayer
 import de.maniac103.squeezeclient.extfuncs.lastSessionPosition
 import de.maniac103.squeezeclient.extfuncs.lastSessionTimestamp
 import de.maniac103.squeezeclient.extfuncs.lastSessionWasPlaying
+import de.maniac103.squeezeclient.extfuncs.localPlayerId
 import de.maniac103.squeezeclient.extfuncs.prefs
 import de.maniac103.squeezeclient.extfuncs.putLastSession
 import de.maniac103.squeezeclient.extfuncs.resumePlayback
@@ -101,6 +102,10 @@ class SqueezeboxMediaPlayer(
     private var playlistFetchJob: Job? = null
     private var delayedStateUpdateJob: Job? = null
     private var unacknowledgedStateRevertJob: Job? = null
+
+    /** Whether the given player is the one built into the app. */
+    private fun isLocalPlayer(playerId: PlayerId) = playerId == appContext.prefs.localPlayerId
+
     private var statusSubscriptionStartTime = 0L
     private var resumeAttempted = false
     private var lastSessionStore = 0L
@@ -482,6 +487,9 @@ class SqueezeboxMediaPlayer(
      */
     private fun rememberSession(state: PlayerState) {
         val playerId = currentPlayer ?: return
+        if (!isLocalPlayer(playerId)) {
+            return
+        }
         if (state.playbackState == PlayerStatus.PlayState.Playing) {
             // Something is playing in this app run, so there is nothing to resume anymore
             resumeAttempted = true
@@ -522,7 +530,7 @@ class SqueezeboxMediaPlayer(
      */
     private fun resumeLastSession(state: PlayerState) {
         val playerId = currentPlayer ?: return
-        if (resumeAttempted) {
+        if (!isLocalPlayer(playerId) || resumeAttempted) {
             return
         }
         val prefs = appContext.prefs
