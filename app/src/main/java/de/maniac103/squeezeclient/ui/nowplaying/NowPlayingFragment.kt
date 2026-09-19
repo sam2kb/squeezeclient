@@ -59,9 +59,9 @@ import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
 import de.maniac103.squeezeclient.model.SlimBrowseItemList
+import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
 import de.maniac103.squeezeclient.ui.bottomsheets.InputBottomSheetFragment
 import de.maniac103.squeezeclient.ui.common.ViewBindingFragment
-import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
 import de.maniac103.squeezeclient.ui.contextmenu.ContextMenuBottomSheetFragment
 import kotlin.math.absoluteValue
 import kotlin.math.max
@@ -560,14 +560,11 @@ class NowPlayingFragment :
         }
     }
 
-    @OptIn(ExperimentalTime::class)
-    /**
-     * Position to display: the local player's own position when we play ourselves - the
-     * server's position model drifts from what is actually played on stream restarts.
-     */
+    /** The local player's position while we play ourselves, the server's otherwise. */
     private fun displayPosition(status: PlayerStatus) =
         LocalPlayerPosition.forPlayer(playerId) ?: status.currentPlayPosition
 
+    @OptIn(ExperimentalTime::class)
     private fun update(status: PlayerStatus) {
         val currentSong = status.playlist.nowPlaying
 
@@ -723,9 +720,8 @@ class NowPlayingFragment :
     private fun sheetIsExpanded() = binding.container.currentState == R.id.expanded
 
     /**
-     * Sends a seek request and keeps the slider at the requested position until the server
-     * reports a position close to it - otherwise the status updates arriving in between would
-     * move the slider back to where playback currently is.
+     * Sends a seek request and keeps the slider at the requested position until a status close
+     * to it arrives - otherwise the updates in between move it back to the server's position.
      */
     private suspend fun seekTo(positionSeconds: Float) {
         pendingSeekPosition = positionSeconds
@@ -747,10 +743,7 @@ class NowPlayingFragment :
         return settled
     }
 
-    /**
-     * Whether the user is moving the slider right now. A touch that never reported its end (e.g.
-     * because the gesture was cancelled) must not block updates forever, hence the timeout.
-     */
+    /** Whether the user moves the slider right now; the timeout recovers from a lost touch end. */
     private fun isUserSeeking() = userSeeking &&
         SystemClock.elapsedRealtime() - lastSeekInputTimestamp < SLIDER_INPUT_TIMEOUT_MS
 

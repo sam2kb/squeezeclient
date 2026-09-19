@@ -91,6 +91,7 @@
             android:title="@string/settings_local_player_enabled_title"
             android:summary="@string/settings_local_player_enabled_summary"
             android:defaultValue="false" />
+
         <ListPreference
             android:key="local_player_volume_mode"
             android:title="@string/settings_local_player_volume_mode_title"

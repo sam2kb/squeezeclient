@@ -338,14 +338,12 @@ class LocalPlaybackService :
         )
     }
 
-    private fun playerPosition(nowNanos: Long = System.nanoTime()): kotlin.time.Duration =
+    private fun playerPosition(nowNanos: Long = System.nanoTime()): Duration =
         streamStartPosition + player.determinePlaybackPosition(nowNanos)
 
     /**
-     * The stream the server just started continues at the position the server assumes the player
-     * to be at, so adopt that position as our starting point. This keeps our position consistent
-     * with the stream we receive, which matters whenever the server moved its position on its own
-     * (e.g. when restoring our previous session).
+     * Adopt the position the server assumes the player to be at as our starting point, as the
+     * stream it just started continues there (e.g. when it restores our previous session).
      */
     private fun alignPositionWithServer() = lifecycleScope.launch {
         val streamUri = currentStreamUri
@@ -364,9 +362,8 @@ class LocalPlaybackService :
 
     /**
      * Asks the server to continue its stream at our position, so playback picks up where the user
-     * actually was instead of at the position the server deduced on its own. The position query
-     * needs the CometD channel, which is still down in the seconds after a connection loss, so
-     * this retries until the server answers.
+     * actually was. Retried, as the position query needs CometD, which is still down right after
+     * a connection loss.
      */
     private fun handOffPositionToServer(restartPosition: Duration) = lifecycleScope.launch {
         val streamUri = currentStreamUri
@@ -467,16 +464,12 @@ class LocalPlaybackService :
 
             is SlimprotoSocket.CommandPacket.StreamStart -> {
                 val previousPosition = playerPosition()
-                // A connection loss makes the server restart its stream for the track we were
-                // playing. That is a continuation of our stream, so keep counting from the
-                // position we had instead of restarting at zero - otherwise the position jumps
-                // back through the track.
+                // The server restarts its stream on a connection loss; that continues our
+                // stream, so keep counting from our position instead of restarting at zero.
                 val continuesCurrentStream = command.uri.toString() == currentStreamUri &&
                     (streamInterrupted || SystemClock.elapsedRealtime() < continuationUntil)
-                // The server resumes a restarted stream at the position it deduced on its own,
-                // which is ahead of what we actually played, as it assumes we consumed
-                // everything it sent. Ask it to continue at our position instead, so the audio
-                // as well as the position it reports afterwards stay continuous.
+                // The server resumes at the position it deduced itself, which is ahead of what
+                // we played (it assumes we consumed all it sent); ask it to use ours instead.
                 val handOffPosition = streamInterrupted && continuesCurrentStream
                 Diag.log(
                     "local",
@@ -493,9 +486,7 @@ class LocalPlaybackService :
                 if (handOffPosition) {
                     handOffPositionToServer(previousPosition)
                 } else if (!continuesCurrentStream) {
-                    // A restarted stream continues at our position, so adopting the server's
-                    // position would undo the continuity - it is ahead of what we played, as
-                    // the server assumes we consumed everything it sent.
+                    // Adopting the server's position here would undo our continuity.
                     alignPositionWithServer()
                 }
                 sentTrackStartStatus = false // new strm-s requires new STMs to be sent

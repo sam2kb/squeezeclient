@@ -29,14 +29,12 @@ import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 /**
- * TEMPORARY diagnostic logging.
+ * TEMPORARY diagnostic logging, debug builds only.
  *
  * Used for tracking down car head unit state sync problems (missing/stale track info, repeated
- * play/pause keys). Everything routes through here, so it can be removed again by deleting this
- * file and dropping all lines that mention `Diag.` (find them with `grep -rn "Diag\." app/src`).
- *
- * Output goes to logcat (tag `SQZDiag`) and to a rotating file, which can be pulled with
- * `adb pull /sdcard/Android/data/de.maniac103.squeezeclient.debug/files/diag.log`.
+ * play/pause keys). Remove by deleting this file and all lines mentioning `Diag.` (find them
+ * with `grep -rn "Diag\." app/src`). Output goes to logcat (tag `SQZDiag`) and to a rotating
+ * file in the app's external files directory.
  */
 @OptIn(ExperimentalTime::class)
 object Diag {
@@ -58,6 +56,9 @@ object Diag {
     }
 
     fun log(area: String, message: String) {
+        if (!BuildConfig.DEBUG) {
+            return
+        }
         val line = "$area: $message"
         Log.d(TAG, line)
         val file = logFile ?: return

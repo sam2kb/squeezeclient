@@ -103,6 +103,7 @@ class SqueezeboxMediaPlayer(
     private var unacknowledgedStateRevertJob: Job? = null
     private var statusSubscriptionStartTime = 0L
     private var resumeAttempted = false
+    private var lastSessionStore = 0L
 
     override fun handleSetDeviceVolume(deviceVolume: Int, flags: Int) = future {
         val playerId = currentPlayer ?: return@future
@@ -482,10 +483,13 @@ class SqueezeboxMediaPlayer(
     private fun rememberSession(state: PlayerState) {
         val playerId = currentPlayer ?: return
         if (state.playbackState == PlayerStatus.PlayState.Playing) {
-            val position = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
-            appContext.prefs.edit { putLastSession(playerId, position, true) }
             // Something is playing in this app run, so there is nothing to resume anymore
             resumeAttempted = true
+            if (!sessionStoreDue()) {
+                return
+            }
+            val position = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
+            appContext.prefs.edit { putLastSession(playerId, position, true) }
             return
         }
         // Ignore what the server reports right after (re)connecting: it may still report the
@@ -495,8 +499,21 @@ class SqueezeboxMediaPlayer(
         if (!settled) {
             return
         }
+        if (!sessionStoreDue()) {
+            return
+        }
         val position = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
         appContext.prefs.edit { putLastSession(playerId, position, false) }
+    }
+
+    /** Whether the session should be remembered now; state updates arrive several times/s. */
+    private fun sessionStoreDue(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastSessionStore < SESSION_STORE_INTERVAL.inWholeMilliseconds) {
+            return false
+        }
+        lastSessionStore = now
+        return true
     }
 
     /**
@@ -612,5 +629,8 @@ class SqueezeboxMediaPlayer(
         // Grace period after (re)connecting during which reported state is not remembered; the
         // server may still report the player as stopped before restoring its previous state.
         private val SESSION_SETTLE_TIME = 10.seconds
+
+        // Minimum time between two stored session positions.
+        private val SESSION_STORE_INTERVAL = 15.seconds
     }
 }
