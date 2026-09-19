@@ -152,13 +152,19 @@ class SqueezeboxMediaPlayer(
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_NEXT -> {
                 PositionChangeRequests.note()
-                updateUnacknowledgedState(playlistPositionOffset = 1)
+                updateUnacknowledgedState(
+                    playlistPositionOffset = 1,
+                    song = songAtOffset(1)
+                )
                 connectionHelper.sendButtonRequest(PlaybackButtonRequest.NextTrack(playerId))
             }
 
             COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS -> {
                 PositionChangeRequests.note()
-                updateUnacknowledgedState(playlistPositionOffset = -1)
+                updateUnacknowledgedState(
+                    playlistPositionOffset = -1,
+                    song = songAtOffset(-1)
+                )
                 connectionHelper.sendButtonRequest(
                     PlaybackButtonRequest.PreviousTrack(playerId)
                 )
@@ -196,7 +202,7 @@ class SqueezeboxMediaPlayer(
     override fun getState(): State {
         val playerState = playerState
             ?: return waitingForPlayerState()
-        val currentSong = playerState.currentSong
+        val currentSong = unacknowledgedStateChange?.song ?: playerState.currentSong
             ?: return State.Builder().setPlaybackState(STATE_IDLE).build()
         val unacknowledgedChange = unacknowledgedStateChange
 
@@ -305,13 +311,27 @@ class SqueezeboxMediaPlayer(
         return builder.build()
     }
 
+    /**
+     * The song a relative playlist move leads to, as far as we know it. A track change should
+     * show the new song right away: until the server confirms it, the previous song (whose
+     * playlist revision is still current) would otherwise be reported for a moment, which makes
+     * head units flip back to it and then forward again.
+     */
+    private fun songAtOffset(offset: Int): Playlist.PlaylistItem? {
+        val state = playerState ?: return null
+        val playlist = state.playlist ?: return null
+        return playlist.items.getOrNull(state.playlistPosition + offset)
+    }
+
     private fun updateUnacknowledgedState(
         absolutePlaylistPosition: Int? = null,
         playlistPositionOffset: Int? = null,
         positionInTrack: Duration? = null,
-        playState: PlayerStatus.PlayState? = null
+        playState: PlayerStatus.PlayState? = null,
+        song: Playlist.PlaylistItem? = null
     ) {
         val newPlayState = playState ?: unacknowledgedStateChange?.playState
+        val newSong = song ?: unacknowledgedStateChange?.song
         val newPositionInTrack = positionInTrack ?: unacknowledgedStateChange?.positionInTrack
         val newAbsolutePosition = absolutePlaylistPosition
             ?: unacknowledgedStateChange?.absolutePlaylistPosition
@@ -335,7 +355,8 @@ class SqueezeboxMediaPlayer(
                 ?.coerceIn(0, playlistLength),
             newOffset?.coerceIn(0, playlistLength),
             newPositionInTrack,
-            newPlayState
+            newPlayState,
+            newSong
         )
         Diag.log("unack", "reporting $unacknowledgedStateChange until the server confirms")
         invalidateState()
@@ -477,9 +498,14 @@ class SqueezeboxMediaPlayer(
                 "state=${newPlayerState.playbackState} " +
                 "playlistRev=${Diag.rev(newPlayerState.playlist?.timestamp)}"
         )
+        val pendingSong = unacknowledgedStateChange?.song
         playerState = newPlayerState
-        unacknowledgedStateChange = null
-        unacknowledgedStateRevertJob?.cancel()
+        // Keep reporting the pending song until the server's state shows it; statuses for the
+        // still-current previous revision arrive in between and would flip the metadata back.
+        if (pendingSong == null || newPlayerState.currentSong == pendingSong) {
+            unacknowledgedStateChange = null
+            unacknowledgedStateRevertJob?.cancel()
+        }
         invalidateState()
         rememberSession(newPlayerState)
         resumeLastSession(newPlayerState)
@@ -624,7 +650,8 @@ class SqueezeboxMediaPlayer(
         val absolutePlaylistPosition: Int? = null,
         val playlistPositionOffset: Int? = null,
         val positionInTrack: Duration? = null,
-        val playState: PlayerStatus.PlayState? = null
+        val playState: PlayerStatus.PlayState? = null,
+        val song: Playlist.PlaylistItem? = null
     )
 
     companion object {
