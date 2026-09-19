@@ -52,6 +52,7 @@ import de.maniac103.squeezeclient.service.NotificationIds
 import de.maniac103.squeezeclient.service.mediasession.MediaService
 import de.maniac103.squeezeclient.ui.MainActivity
 import de.maniac103.squeezeclient.ui.prefs.SettingsActivity
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
@@ -85,6 +86,10 @@ class LocalPlaybackService :
     private var stateListenerJob: Job? = null
     private var statusUpdateJob: Job? = null
     private val slimprotoStateFlow = MutableStateFlow<SlimprotoState>(SlimprotoState.Disconnected)
+
+    /** The song the position currently refers to, and where the stream is when it started. */
+    private var lastSongGeneration = 0
+    private var songStartOffset = Duration.ZERO
 
     private var sentTrackStartStatus = false
     private var sentBufferReady = false
@@ -153,6 +158,7 @@ class LocalPlaybackService :
             slimproto.disconnect()
         }
         player.stop()
+        LocalPlayerPosition.clear()
         super.onDestroy()
     }
 
@@ -323,17 +329,38 @@ class LocalPlaybackService :
         )
     }
 
+    /**
+     * The song we play can change inside a stream: the server appends the next song to it when it
+     * plays gaplessly, and it does so when it considers the current song finished. Count from the
+     * new song's beginning then, instead of carrying on the previous song's position.
+     */
+    private fun checkSongChanged() {
+        val generation = LocalPlayerPosition.songGeneration
+        if (generation == lastSongGeneration) {
+            return
+        }
+        lastSongGeneration = generation
+        // The stream we play continues into the next song when the server plays gaplessly, so the
+        // new song starts at the position the player reached right now.
+        songStartOffset = player.determinePlaybackPosition(System.nanoTime())
+    }
+
     @androidx.annotation.OptIn(UnstableApi::class)
     private suspend fun sendStatus(type: SlimprotoSocket.StatusType) {
         val nowNanos = System.nanoTime()
         val elapsed = (nowNanos - startupTimestampNanos).toDuration(DurationUnit.NANOSECONDS)
         val (bufferFullness, bufferSize) = player.estimateBufferFullnessAndSize()
+        checkSongChanged()
+        val position = LocalPlayerPosition.clamp(
+            player.determinePlaybackPosition(nowNanos) - songStartOffset
+        )
+        LocalPlayerPosition.update(slimproto.playerId, position)
 
         slimproto.sendStatus(
             type,
             elapsed,
             player.readyForPlayback,
-            player.determinePlaybackPosition(nowNanos),
+            position,
             player.totalTransferredBytes,
             bufferFullness,
             bufferSize
