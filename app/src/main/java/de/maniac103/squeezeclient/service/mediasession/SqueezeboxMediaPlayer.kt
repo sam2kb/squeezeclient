@@ -218,8 +218,11 @@ class SqueezeboxMediaPlayer(
 
                 else -> playerState.playlistPosition
             }
+            // An unacknowledged Next/Previous at the end of the list would point past it, which
+            // media3 rejects ("currentMediaItemIndex must be less than playlist.size()").
+            val position = currentPosition.coerceIn(list.offset, list.offset + list.items.size - 1)
             val mediaList: List<MediaItemData> = list.items.mapIndexed { index, item ->
-                val builder = if (index + list.offset == currentPosition) {
+                val builder = if (index + list.offset == position) {
                     // Prefer current song from status over playlist item, because the former
                     // may be more up to date (e.g. in case of radio streams)
                     currentSong.toMediaItemDataBuilder(index).apply {
@@ -230,7 +233,7 @@ class SqueezeboxMediaPlayer(
                 }
                 builder.build()
             }
-            Pair(mediaList, currentPosition - list.offset)
+            Pair(mediaList, position - list.offset)
         } ?: currentSong.let { song ->
             val builder = song.toMediaItemDataBuilder(0)
             currentSongDurationUs?.let { builder.setDurationUs(it) }
@@ -248,10 +251,14 @@ class SqueezeboxMediaPlayer(
                 add(COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
             }
             add(COMMAND_SEEK_TO_MEDIA_ITEM)
-            add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-            add(COMMAND_SEEK_TO_NEXT)
-            add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-            add(COMMAND_SEEK_TO_PREVIOUS)
+            if (currentIndex < playlist.size - 1) {
+                add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                add(COMMAND_SEEK_TO_NEXT)
+            }
+            if (currentIndex > 0) {
+                add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                add(COMMAND_SEEK_TO_PREVIOUS)
+            }
             add(COMMAND_STOP)
             if (playerState.currentVolume != null) {
                 add(COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS)
