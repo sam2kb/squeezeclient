@@ -173,7 +173,8 @@ class SqueezeboxMediaPlayer(
 
         val currentSongDurationUs =
             playerState.currentSongDuration?.toLong(DurationUnit.MICROSECONDS)
-        val (playlist, currentIndex) = playerState.playlist?.let { list ->
+        val playlistInfo = playerState.playlist?.takeIf { it.items.isNotEmpty() }
+        val (playlist, currentIndex) = playlistInfo?.let { list ->
             val currentPosition = when {
                 unacknowledgedChange?.absolutePlaylistPosition != null ->
                     unacknowledgedChange.absolutePlaylistPosition
@@ -183,8 +184,12 @@ class SqueezeboxMediaPlayer(
 
                 else -> playerState.playlistPosition
             }
+            // An unacknowledged Next/Previous the server has not applied yet, or a status whose
+            // playlist is shorter than the position it reports, would point past the list, which
+            // media3 rejects ("currentMediaItemIndex must be less than playlist.size()").
+            val position = currentPosition.coerceIn(list.offset, list.offset + list.items.size - 1)
             val mediaList: List<MediaItemData> = list.items.mapIndexed { index, item ->
-                val builder = if (index + list.offset == currentPosition) {
+                val builder = if (index + list.offset == position) {
                     // Prefer current song from status over playlist item, because the former
                     // may be more up to date (e.g. in case of radio streams)
                     currentSong.toMediaItemDataBuilder(index).apply {
@@ -195,7 +200,7 @@ class SqueezeboxMediaPlayer(
                 }
                 builder.build()
             }
-            Pair(mediaList, currentPosition - list.offset)
+            Pair(mediaList, position - list.offset)
         } ?: currentSong.let { song ->
             val builder = song.toMediaItemDataBuilder(0)
             currentSongDurationUs?.let { builder.setDurationUs(it) }
@@ -213,10 +218,18 @@ class SqueezeboxMediaPlayer(
                 add(COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
             }
             add(COMMAND_SEEK_TO_MEDIA_ITEM)
-            add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-            add(COMMAND_SEEK_TO_NEXT)
-            add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-            add(COMMAND_SEEK_TO_PREVIOUS)
+            // Ask in absolute terms: the server's count survives a truncated playlist window,
+            // while the published list only knows what it shows.
+            val absoluteIndex = currentIndex + (playerState.playlist?.offset ?: 0)
+            val itemCount = playerState.playlist?.totalCount ?: playlist.size
+            if (absoluteIndex + 1 < itemCount) {
+                add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                add(COMMAND_SEEK_TO_NEXT)
+            }
+            if (absoluteIndex > 0) {
+                add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                add(COMMAND_SEEK_TO_PREVIOUS)
+            }
             add(COMMAND_STOP)
             if (playerState.currentVolume != null) {
                 add(COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS)
