@@ -108,6 +108,13 @@ class LocalPlaybackService :
 
     /** Elapsed realtime at which the current stream started. */
     private var streamStartRealtime = 0L
+
+    /** Our position when it was last computed, and when that happened. */
+    private var lastPlayerPosition = Duration.ZERO
+    private var lastPlayerPositionRealtime = 0L
+
+    /** The song the position currently refers to. */
+    private var lastSongGeneration = 0
     override fun onCreate() {
         dispatcher.onServicePreSuperOnCreate()
         super.onCreate()
@@ -357,14 +364,50 @@ class LocalPlaybackService :
         )
     }
 
-    private fun playerPosition(nowNanos: Long = System.nanoTime()): Duration =
-        LocalPlayerPosition.clamp(
+    private fun playerPosition(nowNanos: Long = System.nanoTime()): Duration {
+        val raw = LocalPlayerPosition.clamp(
             streamStartPosition + player.determinePlaybackPosition(nowNanos)
         )
+        val now = SystemClock.elapsedRealtime()
+        if (lastPlayerPositionRealtime == 0L) {
+            lastPlayerPosition = raw
+            lastPlayerPositionRealtime = now
+            return raw
+        }
+        // The player's position can jump right at a stream flush, as the audio track's timestamp
+        // then still refers to what was flushed. A position cannot advance faster than real
+        // time, so such a jump is clamped to the time that really passed.
+        val elapsed = (now - lastPlayerPositionRealtime).milliseconds
+        val position = if (raw > lastPlayerPosition + elapsed + POSITION_JUMP_TOLERANCE) {
+            lastPlayerPosition + elapsed
+        } else {
+            raw
+        }
+        lastPlayerPosition = position
+        lastPlayerPositionRealtime = now
+        return position
+    }
 
     /** Time since the server started the current stream, i.e. our position in it. */
     private fun playedSinceStreamStart() =
         (SystemClock.elapsedRealtime() - streamStartRealtime).milliseconds
+
+    /**
+     * The song we play can change inside a stream: the server appends the next song to it when it
+     * plays gaplessly, and it does so when it considers the current song finished. Count from the
+     * new song's beginning then, instead of carrying on the previous song's position.
+     */
+    private fun checkSongChanged() {
+        val generation = LocalPlayerPosition.songGeneration
+        if (generation == lastSongGeneration) {
+            return
+        }
+        lastSongGeneration = generation
+        val played = player.determinePlaybackPosition(System.nanoTime())
+        streamStartPosition = -played
+        lastPlayerPositionRealtime = 0
+        Diag.log("local", "song changed, counting from 0 again")
+    }
 
     /**
      * The server restarts a stream at the position it chose. When that position is inside the
@@ -386,6 +429,7 @@ class LocalPlaybackService :
                 return@launch // The server starts the song at its beginning, nothing to adopt
             }
             streamStartPosition = serverPosition.seconds - played
+            lastPlayerPositionRealtime = 0
             Diag.log(
                 "local",
                 "adopted server position: server=$serverPosition played=$played " +
@@ -454,6 +498,7 @@ class LocalPlaybackService :
         val nowNanos = System.nanoTime()
         val elapsed = (nowNanos - startupTimestampNanos).toDuration(DurationUnit.NANOSECONDS)
         val (bufferFullness, bufferSize) = player.estimateBufferFullnessAndSize()
+        checkSongChanged()
         val position = playerPosition(nowNanos)
         LocalPlayerPosition.update(slimproto.playerId, position)
         Diag.log(
@@ -538,6 +583,7 @@ class LocalPlaybackService :
                 } else {
                     Duration.ZERO
                 }
+                lastPlayerPositionRealtime = 0
                 if (handOffPosition) {
                     handOffPositionToServer(previousPosition)
                 } else if (!continuesCurrentStream) {
@@ -666,6 +712,9 @@ class LocalPlaybackService :
 
         /** Tolerance for deciding whether a finished stream ended the song. */
         private val STREAM_END_TOLERANCE = 2.seconds
+
+        /** How far the position may jump beyond the time that actually passed. */
+        private val POSITION_JUMP_TOLERANCE = 5.seconds
 
         fun triggerStartOrStop(context: Context) {
             val serviceIntent = Intent(context, LocalPlaybackService::class.java)

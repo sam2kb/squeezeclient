@@ -491,6 +491,10 @@ class SqueezeboxMediaPlayer(
 
     private fun applyPlayerState(newPlayerState: PlayerState) {
         LocalPlayerPosition.updateDuration(newPlayerState.currentSongDuration)
+        val previousSong = playerState?.currentSong
+        if (previousSong != null && previousSong != newPlayerState.currentSong) {
+            LocalPlayerPosition.noteSongChanged()
+        }
         Diag.log(
             "state",
             "applied song=${Diag.song(newPlayerState.currentSong)} " +

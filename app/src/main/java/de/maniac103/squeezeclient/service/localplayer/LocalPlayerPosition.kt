@@ -17,6 +17,11 @@ object LocalPlayerPosition {
     var songDuration: Duration? = null
         private set
 
+    /** Increases whenever the song the app plays (for the local player) changes. */
+    @Volatile
+    var songGeneration = 0
+        private set
+
     /**
      * The position the given player is playing at, if we play it ourselves. Never beyond the
      * song's end: a stream can play longer than the song (e.g. when the server appended the next
@@ -34,6 +39,10 @@ object LocalPlayerPosition {
     /** Duration of the song currently being played, as reported by the server. */
     fun updateDuration(duration: Duration?) {
         songDuration = duration
+    }
+
+    fun noteSongChanged() {
+        songGeneration++
     }
 
     fun update(playerId: PlayerId, position: Duration) {
