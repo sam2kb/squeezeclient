@@ -613,6 +613,10 @@ class NowPlayingFragment :
                 val newValue = position.coerceIn(0F, duration)
                 if (canApplyPosition(newValue)) {
                     value = newValue
+                } else if (value > duration) {
+                    // The update is held back (a seek is pending or the user drags the slider),
+                    // but the value must stay inside the range or Slider crashes when drawn.
+                    value = duration
                 }
                 isEnabled = status.playbackState != PlayerStatus.PlayState.Stopped
             }
