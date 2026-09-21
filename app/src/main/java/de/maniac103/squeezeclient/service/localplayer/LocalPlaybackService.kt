@@ -105,6 +105,9 @@ class LocalPlaybackService :
 
     /** Whether the next stream the server starts resumes the track we are paused in. */
     private var streamResumesAfterPause = false
+
+    /** Elapsed realtime at which the current stream started. */
+    private var streamStartRealtime = 0L
     override fun onCreate() {
         dispatcher.onServicePreSuperOnCreate()
         super.onCreate()
@@ -217,6 +220,12 @@ class LocalPlaybackService :
     }
 
     private fun onPlaybackEnded(streamEnded: Boolean) = lifecycleScope.launch {
+        if (streamEnded && !songHasEnded()) {
+            // The stream ended before the song did - the connection died, and the server will
+            // restart the stream (at the position it deduced in the meantime) once the player
+            // is back. That restart then continues our playback.
+            streamInterrupted = true
+        }
         slimprotoStateFlow.emit(SlimprotoState.Stopped)
         sentTrackStartStatus = false
         sentBufferReady = false
@@ -241,6 +250,12 @@ class LocalPlaybackService :
 
     private fun onDecodingFinished() = lifecycleScope.launch {
         sendStatus(SlimprotoSocket.StatusType.DecoderUnderrun)
+    }
+
+    /** Whether the song we play has reached its end, as far as its duration is known. */
+    private fun songHasEnded(): Boolean {
+        val duration = LocalPlayerPosition.songDuration ?: return true
+        return playerPosition() >= duration - STREAM_END_TOLERANCE
     }
 
     private suspend fun handlePlaybackStart() {
@@ -347,24 +362,36 @@ class LocalPlaybackService :
             streamStartPosition + player.determinePlaybackPosition(nowNanos)
         )
 
+    /** Time since the server started the current stream, i.e. our position in it. */
+    private fun playedSinceStreamStart() =
+        (SystemClock.elapsedRealtime() - streamStartRealtime).milliseconds
+
     /**
-     * Adopt the position the server assumes the player to be at as our starting point, as the
-     * stream it just started continues there (e.g. when it restores our previous session).
+     * The server restarts a stream at the position it chose. When that position is inside the
+     * song (it restores a session, or its stream resumes somewhere in the middle), adopt it so
+     * the position follows the audio; a stream that starts a song from its beginning is left
+     * alone, as its position is zero like ours. The status is read after a short delay, because
+     * right after the restart it still describes the stream we came from.
      */
-    private fun alignPositionWithServer() = lifecycleScope.launch {
-        val streamUri = currentStreamUri
-        val serverPosition = fetchServerPosition() ?: return@launch
-        if (currentStreamUri != streamUri) {
-            return@launch // Another stream started in the meantime
+    private fun checkServerPositionAfterRestart(previousPosition: Duration) =
+        lifecycleScope.launch {
+            val streamUri = currentStreamUri
+            delay(RESTART_STATUS_DELAY)
+            if (currentStreamUri != streamUri) {
+                return@launch // Another stream started in the meantime
+            }
+            val serverPosition = fetchServerPosition() ?: return@launch
+            val played = playedSinceStreamStart()
+            if (serverPosition <= played.inWholeSeconds + ADOPT_MIN_DIFFERENCE.inWholeSeconds) {
+                return@launch // The server starts the song at its beginning, nothing to adopt
+            }
+            streamStartPosition = serverPosition.seconds - played
+            Diag.log(
+                "local",
+                "adopted server position: server=$serverPosition played=$played " +
+                    "was=$previousPosition base=$streamStartPosition"
+            )
         }
-        val played = player.determinePlaybackPosition(System.nanoTime())
-        streamStartPosition = serverPosition.seconds - played
-        Diag.log(
-            "local",
-            "aligned with server: server=$serverPosition played=$played " +
-                "base=$streamStartPosition"
-        )
-    }
 
     /**
      * Asks the server to continue its stream at our position, so playback picks up where the user
@@ -481,9 +508,11 @@ class LocalPlaybackService :
                         streamInterrupted || streamResumesAfterPause ||
                             SystemClock.elapsedRealtime() < continuationUntil
                         )
-                // The server resumes at the position it deduced itself, which is ahead of what
-                // we played (it assumes we consumed all it sent); ask it to use ours instead.
-                val handOffPosition = streamInterrupted && continuesCurrentStream
+                // The server resumes at the position it deduced itself, which can be ahead of
+                // what we played: it assumes everything it sent was consumed, and it keeps
+                // counting while we are not connected. Ask it to use our position instead.
+                val handOffPosition = continuesCurrentStream &&
+                    (streamInterrupted || streamResumesAfterPause)
                 Diag.log(
                     "local",
                     "strm-s uri=${command.uri} autoStart=${command.autoStart} " +
@@ -501,18 +530,18 @@ class LocalPlaybackService :
                 streamResumesAfterPause = false
                 sendStatus(SlimprotoSocket.StatusType.Connecting)
                 currentStreamUri = command.uri.toString()
-                // Part of the stream may already have been played; subtracting that keeps our
-                // position continuous whether or not the server restarted the player with it.
+                streamStartRealtime = SystemClock.elapsedRealtime()
+                // The player's timeline starts at zero with the new stream, so our position in
+                // the restarted stream simply is where we were when it ended.
                 streamStartPosition = if (continuesCurrentStream) {
-                    previousPosition - player.determinePlaybackPosition(System.nanoTime())
+                    previousPosition
                 } else {
                     Duration.ZERO
                 }
                 if (handOffPosition) {
                     handOffPositionToServer(previousPosition)
                 } else if (!continuesCurrentStream) {
-                    // Adopting the server's position here would undo our continuity.
-                    alignPositionWithServer()
+                    checkServerPositionAfterRestart(previousPosition)
                 }
                 sentTrackStartStatus = false // new strm-s requires new STMs to be sent
                 sentBufferReady = command.autoStart
@@ -628,6 +657,15 @@ class LocalPlaybackService :
 
         /** Time window in which a stream started by the server is still considered a restart. */
         private val SEEK_RESTART_WINDOW = 5.seconds
+
+        /** Delay before the server's position is read after it restarted a stream. */
+        private val RESTART_STATUS_DELAY = 2.seconds
+
+        /** Position the server must have advanced into the song for us to adopt it. */
+        private val ADOPT_MIN_DIFFERENCE = 2.seconds
+
+        /** Tolerance for deciding whether a finished stream ended the song. */
+        private val STREAM_END_TOLERANCE = 2.seconds
 
         fun triggerStartOrStop(context: Context) {
             val serviceIntent = Intent(context, LocalPlaybackService::class.java)

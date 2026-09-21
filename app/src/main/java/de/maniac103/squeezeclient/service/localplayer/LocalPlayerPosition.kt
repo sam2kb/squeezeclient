@@ -12,8 +12,10 @@ object LocalPlayerPosition {
     @Volatile
     private var current: Pair<PlayerId, Duration>? = null
 
+    /** Duration of the song currently being played, as reported by the server. */
     @Volatile
-    private var songDuration: Duration? = null
+    var songDuration: Duration? = null
+        private set
 
     /**
      * The position the given player is playing at, if we play it ourselves. Never beyond the
