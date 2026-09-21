@@ -31,6 +31,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import de.maniac103.squeezeclient.R
+import de.maniac103.squeezeclient.cometd.CometdClient
 import de.maniac103.squeezeclient.databinding.FragmentGenericListBinding
 import de.maniac103.squeezeclient.extfuncs.forceGridLayout
 import de.maniac103.squeezeclient.extfuncs.prefs
@@ -38,6 +39,7 @@ import de.maniac103.squeezeclient.model.ListResponse
 import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.ui.widget.AutoFitGridLayoutManager
 import kotlin.math.max
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import me.zhanghai.android.fastscroll.FastScrollerBuilder
@@ -131,7 +133,14 @@ abstract class BasePagingListFragment<T : Any, VH : RecyclerView.ViewHolder> :
                 itemsBefore = result.offset,
                 itemsAfter = max(remainder, 0)
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: IllegalStateException) {
+            // Failing to load a page, e.g. because we are not connected to the server or the
+            // fragment was detached, is reported as a load error so the list can show it and
+            // retry instead of the app crashing.
+            LoadResult.Error(e)
+        } catch (e: CometdClient.CometdException) {
             LoadResult.Error(e)
         }
     }
