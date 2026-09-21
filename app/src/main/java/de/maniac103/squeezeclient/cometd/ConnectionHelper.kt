@@ -407,8 +407,10 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
     @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun publishOneShotRequest(request: Request): JsonElement {
         val client = client
-        val clientId = client?.clientId ?: throw IllegalStateException()
-        val scope = connectionScope ?: throw IllegalStateException()
+        val clientId = client?.clientId
+            ?: throw CometdClient.CometdException("Not connected to the server")
+        val scope = connectionScope
+            ?: throw CometdClient.CometdException("Not connected to the server")
 
         return try {
             publishSingleOneShotRequestAttempt(client, clientId, scope, request)
@@ -629,7 +631,13 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
                         jobHolder.cancel(e)
                     }
                     if (subscribed) {
-                        requestMethod()?.let { emit(it) }
+                        // Not connected (yet); the subscription below delivers the state once
+                        // we are, so a failed request must not be fatal.
+                        try {
+                            requestMethod()?.let { emit(it) }
+                        } catch (e: CometdClient.CometdException) {
+                            Log.d(TAG, "Could not request the initial state", e)
+                        }
                         jobHolder.launch {
                             try {
                                 val flow = connectionHelper.client?.subscribe(responseChannel)
