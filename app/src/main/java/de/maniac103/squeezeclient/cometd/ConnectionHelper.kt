@@ -261,24 +261,23 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
         ).asModelPlaylist(json, page.start.toInt())
 
     suspend fun movePlaylistItem(playerId: PlayerId, fromPosition: Int, toPosition: Int) =
-        publishOneShotRequest(MovePlaylistItemRequest(playerId, fromPosition, toPosition))
+        publishCommand(MovePlaylistItemRequest(playerId, fromPosition, toPosition))
 
     suspend fun removePlaylistItem(playerId: PlayerId, position: Int) =
-        publishOneShotRequest(RemovePlaylistItemRequest(playerId, position))
+        publishCommand(RemovePlaylistItemRequest(playerId, position))
 
-    suspend fun advanceToPlaylistPosition(playerId: PlayerId, position: Int) =
-        publishOneShotRequest(
-            SetPlaylistPositionRequest(playerId, position, appContext.prefs.fadeInDuration)
-        )
+    suspend fun advanceToPlaylistPosition(playerId: PlayerId, position: Int) = publishCommand(
+        SetPlaylistPositionRequest(playerId, position, appContext.prefs.fadeInDuration)
+    )
 
     suspend fun clearCurrentPlaylist(playerId: PlayerId) =
-        publishOneShotRequest(ClearPlaylistRequest(playerId))
+        publishCommand(ClearPlaylistRequest(playerId))
 
     suspend fun saveCurrentPlaylist(playerId: PlayerId, name: String) =
-        publishOneShotRequest(SavePlaylistRequest(playerId, name))
+        publishCommand(SavePlaylistRequest(playerId, name))
 
     suspend fun executeAction(playerId: PlayerId, action: JiveAction) =
-        publishOneShotRequest(ExecuteActionRequest(playerId, action))
+        publishCommand(ExecuteActionRequest(playerId, action))
 
     suspend fun changePlaybackState(playerId: PlayerId, state: PlayerStatus.PlayState) {
         val currentState = playerStates[playerId]
@@ -301,28 +300,26 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
                 ChangePlaybackStateRequest.Play(playerId, appContext.prefs.fadeInDuration)
             }
         } ?: return
-        publishOneShotRequest(request)
+        publishCommand(request)
     }
 
     suspend fun syncPlayers(masterPlayerId: PlayerId, slavePlayerId: PlayerId) =
-        publishOneShotRequest(SyncPlayersRequest(masterPlayerId, slavePlayerId))
-    suspend fun unsyncPlayer(playerId: PlayerId) =
-        publishOneShotRequest(UnsyncPlayerRequest(playerId))
+        publishCommand(SyncPlayersRequest(masterPlayerId, slavePlayerId))
+    suspend fun unsyncPlayer(playerId: PlayerId) = publishCommand(UnsyncPlayerRequest(playerId))
 
     suspend fun setMuteState(playerId: PlayerId, muted: Boolean) =
-        publishOneShotRequest(SetMuteStateRequest(playerId, muted))
+        publishCommand(SetMuteStateRequest(playerId, muted))
 
     suspend fun setVolume(playerId: PlayerId, volume: Int) =
-        publishOneShotRequest(SetVolumeRequest(playerId, volume))
+        publishCommand(SetVolumeRequest(playerId, volume))
 
-    suspend fun togglePower(playerId: PlayerId) =
-        publishOneShotRequest(PlayerPowerRequest(playerId, null))
+    suspend fun togglePower(playerId: PlayerId) = publishCommand(PlayerPowerRequest(playerId, null))
     suspend fun setPowerState(playerId: PlayerId, on: Boolean) =
-        publishOneShotRequest(PlayerPowerRequest(playerId, on))
-    suspend fun sendButtonRequest(request: PlaybackButtonRequest) = publishOneShotRequest(request)
+        publishCommand(PlayerPowerRequest(playerId, on))
+    suspend fun sendButtonRequest(request: PlaybackButtonRequest) = publishCommand(request)
 
     suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) =
-        publishOneShotRequest(SetPlaybackPositionRequest(playerId, positionSeconds))
+        publishCommand(SetPlaybackPositionRequest(playerId, positionSeconds))
 
     suspend fun getLocalLibrarySearchResultCounts(
         searchTerm: String
@@ -372,11 +369,28 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
         return json.decodeFromJsonElement<T>(jsonData)
     }
 
+    /**
+     * Sends a command nobody waits for. If it cannot be delivered - the server is unreachable or
+     * the connection is being re-established - it is dropped: the server cannot act on it anyway,
+     * and a command must never take its caller down with it.
+     */
+    private suspend fun publishCommand(request: Request) {
+        try {
+            publishOneShotRequest(request)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d(TAG, "Could not send $request", e)
+        }
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun publishOneShotRequest(request: Request): JsonElement {
         val client = client
-        val clientId = client?.clientId ?: throw IllegalStateException()
-        val scope = connectionScope ?: throw IllegalStateException()
+        val clientId = client?.clientId
+            ?: throw CometdClient.CometdException("Not connected to the server")
+        val scope = connectionScope
+            ?: throw CometdClient.CometdException("Not connected to the server")
 
         return try {
             publishSingleOneShotRequestAttempt(client, clientId, scope, request)
@@ -597,7 +611,15 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
                         jobHolder.cancel(e)
                     }
                     if (subscribed) {
-                        requestMethod()?.let { emit(it) }
+                        // Not connected (yet); the subscription below delivers the state once
+                        // we are, so nothing the initial request can fail with must be fatal.
+                        try {
+                            requestMethod()?.let { emit(it) }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Could not request the initial state", e)
+                        }
                         jobHolder.launch {
                             try {
                                 val flow = connectionHelper.client?.subscribe(responseChannel)
