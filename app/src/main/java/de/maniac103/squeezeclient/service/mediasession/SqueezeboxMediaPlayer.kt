@@ -38,6 +38,7 @@ import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
+import de.maniac103.squeezeclient.service.localplayer.LocalPlayerVolume
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -218,6 +219,8 @@ class SqueezeboxMediaPlayer(
             add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
             add(COMMAND_SEEK_TO_PREVIOUS)
             add(COMMAND_STOP)
+            // The mixer volume the user chose; the local player treats it as the authority.
+            LocalPlayerVolume.publish(playerState.currentVolume)
             if (playerState.currentVolume != null) {
                 add(COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS)
                 add(COMMAND_GET_DEVICE_VOLUME)
