@@ -31,6 +31,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import de.maniac103.squeezeclient.cometd.ConnectionHelper
+import de.maniac103.squeezeclient.cometd.ConnectionState
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.extfuncs.prefs
 import de.maniac103.squeezeclient.extfuncs.volumeStepSize
@@ -121,8 +122,13 @@ class SqueezeboxMediaPlayer(
         connectionHelper.changePlaybackState(playerId, newState)
     }
 
+    private fun isConnected() = connectionHelper.state.value is ConnectionState.Connected
+
     override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int) = future {
         val playerId = currentPlayer ?: return@future
+        // A seek cannot succeed while the connection is down; bail out instead of making
+        // the media session walk through the playlist on its own.
+        if (!isConnected()) return@future
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_NEXT -> {
                 updateUnacknowledgedState(playlistPositionOffset = 1)
