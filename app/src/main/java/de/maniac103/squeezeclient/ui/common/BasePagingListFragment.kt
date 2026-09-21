@@ -131,7 +131,9 @@ abstract class BasePagingListFragment<T : Any, VH : RecyclerView.ViewHolder> :
                 itemsBefore = result.offset,
                 itemsAfter = max(remainder, 0)
             )
-        } catch (e: IllegalStateException) {
+        } catch (e: Exception) {
+            // Any failure, e.g. not being connected to the server, is reported as a load error so
+            // the list can show it and retry instead of the app crashing.
             LoadResult.Error(e)
         }
     }

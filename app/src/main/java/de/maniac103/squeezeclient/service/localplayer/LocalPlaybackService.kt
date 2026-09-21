@@ -472,10 +472,14 @@ class LocalPlaybackService :
                 Diag.log("local", "asking the server to continue at $ourPosition")
                 continuationUntil =
                     SystemClock.elapsedRealtime() + SEEK_RESTART_WINDOW.inWholeMilliseconds
-                connectionHelper.updatePlaybackPosition(
-                    slimproto.playerId,
-                    ourPosition.inWholeSeconds.toInt()
-                )
+                // A connection loss right here must not take the app down; the next
+                // interruption tries again.
+                runCatching {
+                    connectionHelper.updatePlaybackPosition(
+                        slimproto.playerId,
+                        ourPosition.inWholeSeconds.toInt()
+                    )
+                }
                 // Our own request must not make the restart look server-controlled.
                 PositionChangeRequests.clear()
                 return@launch
