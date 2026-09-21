@@ -200,7 +200,8 @@ class LocalPlayer(
         mimeType: String?,
         headers: Map<String, String>,
         replayGain: Float,
-        autoStart: Boolean
+        autoStart: Boolean,
+        replace: Boolean = false
     ) {
         val mediaItem = MediaItem.Builder()
             .setUri(uri)
@@ -228,7 +229,9 @@ class LocalPlayer(
 
         currentReplayGain = replayGain
 
-        if (player.playbackState == Player.STATE_IDLE) {
+        // A restarted stream replaces the one we play, while a stream for the next playlist item
+        // is appended (that is how gapless transitions are pre-buffered).
+        if (replace || player.playbackState == Player.STATE_IDLE) {
             player.setMediaSource(mediaSource)
             player.prepare()
             player.playWhenReady = autoStart

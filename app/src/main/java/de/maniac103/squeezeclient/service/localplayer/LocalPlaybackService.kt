@@ -100,6 +100,9 @@ class LocalPlaybackService :
     private var streamStartPosition = Duration.ZERO
     private var streamInterrupted = false
 
+    /** Set while we asked the server to continue our stream at our position. */
+    private var handOffPending = false
+
     /** Elapsed realtime until which a stream restarted by the server still continues our stream. */
     private var continuationUntil = 0L
 
@@ -472,6 +475,9 @@ class LocalPlaybackService :
                 Diag.log("local", "asking the server to continue at $ourPosition")
                 continuationUntil =
                     SystemClock.elapsedRealtime() + SEEK_RESTART_WINDOW.inWholeMilliseconds
+                // The stream the server starts for this request continues ours, so it must not
+                // be mistaken for a stream the server started on its own.
+                handOffPending = true
                 // A connection loss right here must not take the app down; the next
                 // interruption tries again.
                 runCatching {
@@ -552,11 +558,12 @@ class LocalPlaybackService :
                 // stream, so keep counting from our position instead of restarting at zero.
                 // A stream the server starts right after we asked for a different position or
                 // track plays what the server chose - everything else continues our track.
-                val continuesCurrentStream = !PositionChangeRequests.isRecent() &&
-                    command.uri.toString() == currentStreamUri && (
-                        streamInterrupted || streamResumesAfterPause ||
-                            SystemClock.elapsedRealtime() < continuationUntil
-                        )
+                val handOffDue = handOffPending &&
+                    SystemClock.elapsedRealtime() < continuationUntil
+                val streamContinues = handOffDue || streamInterrupted || streamResumesAfterPause ||
+                    SystemClock.elapsedRealtime() < continuationUntil
+                val continuesCurrentStream = (!PositionChangeRequests.isRecent() || handOffDue) &&
+                    command.uri.toString() == currentStreamUri && streamContinues
                 // The server resumes at the position it deduced itself, which can be ahead of
                 // what we played: it assumes everything it sent was consumed, and it keeps
                 // counting while we are not connected. Ask it to use our position instead.
@@ -577,6 +584,7 @@ class LocalPlaybackService :
                 }
                 streamInterrupted = false
                 streamResumesAfterPause = false
+                handOffPending = false
                 sendStatus(SlimprotoSocket.StatusType.Connecting)
                 currentStreamUri = command.uri.toString()
                 streamStartRealtime = SystemClock.elapsedRealtime()
@@ -602,7 +610,10 @@ class LocalPlaybackService :
                     command.replayGain,
                     // In direct streaming case we need to wait for the
                     // continue packet before starting playback
-                    command.autoStart && !command.directStreaming
+                    command.autoStart && !command.directStreaming,
+                    // A restarted stream replaces the stream we play; a stream for the next
+                    // playlist item is appended so it can be pre-buffered for gapless playback.
+                    continuesCurrentStream
                 )
             }
 
