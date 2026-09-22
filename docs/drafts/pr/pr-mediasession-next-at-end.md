@@ -44,7 +44,7 @@ java.lang.IllegalArgumentException: currentMediaItemIndex must be less than play
 - only advertise `COMMAND_SEEK_TO_NEXT*`/`COMMAND_SEEK_TO_PREVIOUS*` when there is such an item,
   so controllers do not offer buttons that cannot work.
 
-Diff: one file, +13 / -6 (`service/mediasession/SqueezeboxMediaPlayer.kt`).
+Diff: one file, +21 / -7 (`service/mediasession/SqueezeboxMediaPlayer.kt`).
 Branch: `fix/mediasession-next-at-playlist-end` (`b10065d`, off `upstream/main` `6dacef7`), pushed
 to the fork (`origin`), not to upstream.
 

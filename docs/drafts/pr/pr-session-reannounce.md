@@ -58,6 +58,11 @@ Note: this was observed with the previous media session implementation (before t
 into `service/mediasession/`), so it is worth re-checking whether the current code still needs it.
 
 Diff: one file, +28 (`service/mediasession/MediaService.kt`).
+**Withdrawn** - the review showed the calls this is built on cannot re-announce anything a head
+unit reads (media3 `addSession`/`removeSession` only mutate the session map, the notification and a
+listener), and the log line quoted below comes from a different commit. Kept as a record, not for
+upstream.
+
 Branch: `fix/session-reannounce` (`a6b1af8`, off `upstream/main` `6dacef7`), pushed to the fork
 (`origin`), not to upstream.
 

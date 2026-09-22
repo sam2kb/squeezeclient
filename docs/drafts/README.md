@@ -14,15 +14,15 @@ upstream. Nothing here is proposed upstream yet.
 
 | branch | commit | subject | diff | PR text |
 | --- | --- | --- | --- | --- |
-| `fix/cometd-request-while-disconnected` | `1c453ab` | CometD: Don't crash when a request is submitted while disconnected | 2 files, +14/-4 | `pr/pr-cometd-crash.md` |
+| `fix/cometd-request-while-disconnected` | `9df2bbc` | CometD: Don't crash when a request is submitted while disconnected | 2 files, +22/-3 | `pr/pr-cometd-crash.md` |
 | `fix/local-position-display` | `9fbb028` | Show the position the local player plays instead of the server's estimate | 4 files, +108/-10 | `pr/pr-local-position-display.md` |
-| `fix/mediasession-next-at-playlist-end` | `b10065d` | Media session: Do not offer Next/Previous when there is no next/previous track | 1 file, +13/-6 | `pr/pr-mediasession-next-at-end.md` |
+| `fix/mediasession-next-at-playlist-end` | `c5dab2f` | Media session: Keep the reported playlist index inside the list | 1 file, +21/-7 | `pr/pr-mediasession-next-at-end.md` |
 | `fix/mediasession-pending-track` | `4f3caf6` | Report the expected song for our own track changes | 1 file, +35/-8 | `pr/pr-pending-track-flap.md` |
-| `fix/position-after-disconnect` | `759b462` | Local player: Keep the position across a server-initiated stream restart | 4 files, +274/-5 | `pr/pr-position-after-disconnect.md` |
+| `fix/position-after-disconnect` | `cab626b` | Local player: Keep the position across a server-initiated stream restart | 5 files, +275/-5 | `pr/pr-position-after-disconnect.md` |
 | `fix/session-reannounce` | `a6b1af8` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
 | `fix/slider-drag` | `3d4c247` | Now playing: Don't let status updates fight the position slider | 1 file, +95/-5 | `pr/pr-slider-drag.md` |
 | `fix/volume-device-volume-fades` | `ba7f766` | Local player: Keep the device volume across playback state changes | 1 file, +61 | `pr/pr-volume-fades.md` |
-| `feature/nowplaying-favorite-toggle` | `6dc0c91` | Now playing: Add a one tap favorite toggle | 14 files, +427/-13 | PR body is on the fork (this branch had one before) |
+| `feature/nowplaying-favorite-toggle` | `41636bd` | Now playing: Add a one tap favorite toggle | 14 files, +437/-13 | PR body is on the fork (this branch had one before) |
 
 Two more drafts have no branch of their own:
 
@@ -32,9 +32,43 @@ Two more drafts have no branch of their own:
 | position a seek asked for | inside `fix/position-after-disconnect` (`759b462`) | written on top of `PositionChangeRequests`; ported by hand, see `pr/pr-position-after-seek.md` |
 
 Rebase state: `feature/nowplaying-favorite-toggle` was rebased onto `6dacef7` and squashed to one
-commit (`6dc0c91`) after this session started - everything else in the table above was already a
-single commit on `6dacef7`. Conflict-free rebases were possible for nine of the older branches; the
-rest are listed as obsolete below.
+commit after this session started - everything else in the table above was already a single commit
+on `6dacef7`. Conflict-free rebases were possible for nine of the older branches; the rest are
+listed as obsolete below.
+
+## Review outcome (2026-09-22)
+
+An independent review of every draft lives in `reviews/` (written on `review/draft-prs`, `a3c654e`).
+Its claims were checked against the code and what held up was fixed in the drafts:
+
+- `fix/cometd-request-while-disconnected` `9df2bbc` - the paging catch is limited to the two
+  exceptions this request path produces and rethrows cancellation (the old `catch (e: Exception)`
+  turned bugs into an empty list and swallowed Paging's cancellation); the subscription flow's
+  initial-request catch now really does catch every failure, as its comment claims.
+- `fix/mediasession-next-at-playlist-end` `c5dab2f` - an empty playlist window no longer falls into
+  the clamp (`coerceIn(n, n-1)` throws; now `takeIf { it.items.isNotEmpty() }`), and the skip
+  commands are advertised against the server's track count instead of the published window, so a
+  truncated playlist does not hide Next.
+- `fix/position-after-disconnect` `cab626b` - the port had dropped the track-change
+  `PositionChangeRequests.note()` calls of the Next/Previous buttons; they are back. The
+  stream-URL comparison (dead - every LMS stream has the same URL) is gone.
+- `feature/nowplaying-favorite-toggle` `41636bd` - a failed write is a failure again: the connection
+  helper reports a request failure by cancelling the coroutine, which used to skip the rollback and
+  leave the icon flipped with no message.
+
+Withdrawn, not for upstream: `fix/session-reannounce`. The review showed that media3's
+`addSession`/`removeSession` never release or re-activate the framework session a head unit reads,
+and the log line its PR text quoted comes from a different commit. The branch stays as a record.
+
+Deferred to a follow-up pass (the reviews' own recommendations, not rebase-level defects):
+`fix/local-position-display` (per-player position but global duration/generation; the `sendStatus`
+change is out of scope and belongs in its own PR), `fix/volume-device-volume-fades` (the
+paused-time semantics and the 2 s window want a decision; a fade should not be written into the
+internal volume), `fix/mediasession-pending-track` (prefer the review's smaller form of the
+prediction lifetime), `fix/slider-drag` (watchdog for `userSeeking`), and the stream-start draft
+(attribution: a 2 s duration coincidence can still key the wrong track; the Ogg half should wait
+for a real reproduction). The check report below was generated before this pass and is being
+regenerated.
 
 ## Obsolete (not in the review set, not pushed again)
 

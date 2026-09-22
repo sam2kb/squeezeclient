@@ -50,7 +50,7 @@ request path used before - so the new exception type escaped it and the process 
 same problem with a different caller, so it is fixed in the same change: a page load reports any
 failure as a load error, so the list can show it and retry.
 
-Diff: 2 files, +14 / -4 (`cometd/ConnectionHelper.kt`, `ui/common/BasePagingListFragment.kt`).
+Diff: 2 files, +22 / -3 (`cometd/ConnectionHelper.kt`, `ui/common/BasePagingListFragment.kt`).
 Branch: `fix/cometd-request-while-disconnected` (`1c453ab`, off `upstream/main` `6dacef7`), pushed
 to the fork (`origin`), not to upstream.
 
