@@ -5,7 +5,7 @@ should be suspicious about. Everything here is knowledge from the session that p
 branches; the mechanical checks (standalone compile, lint, conflicts) come from `check.sh` /
 `check-report.txt`.
 
-All drafts also live together on `integrate/upstream-favs-sync-fix` (with their fixes integrated,
+All drafts also live together on `main` (with their fixes integrated,
 not as separate commits), which is what the test phone has been running, so their behaviour *in
 combination* is what was used most of the time. The branch is not a PR; it is the review and test
 ground.

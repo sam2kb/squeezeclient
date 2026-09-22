@@ -1,8 +1,12 @@
 # Draft PRs - review kit
 
-This directory is the tracked copy of the review kit: it ships on the integration branch
-(`integrate/upstream-favs-sync-fix`), so another agent can fetch the fork and review every draft
-without access to this workstation. The scratch originals stay in git-ignored `build/drafts/`.
+This directory is the tracked copy of the review kit: it ships on `main`, so another agent can fetch
+the fork and review every draft without access to this workstation.
+
+`main` is the complete line: every draft integrated plus the fixes that came out of the review in
+`reviews/`. Build the APKs from it (it is what the test phone runs); the individual drafts stay as
+one-commit branches on top of upstream, to be proposed one at a time. The scratch originals stay in
+git-ignored `build/drafts/`.
 
 All branches are single commits on top of upstream `maniac103/squeezeclient` as of `6dacef7`, and
 they are pushed to the fork `origin` (`git@github.com:sam2kb/squeezeclient.git`) - **not** to
@@ -28,7 +32,7 @@ Two more drafts have no branch of their own:
 
 | draft | where | why |
 | --- | --- | --- |
-| stream start on resume (built-in player) | `integrate/upstream-favs-sync-fix`, commit `f6fc998` | uses the current-track-info request of the favorite toggle, so it does not stand alone on `6dacef7` - `pr/pr-stream-start-on-resume.md` |
+| stream start on resume (built-in player) | `main`, commit `f6fc998` | uses the current-track-info request of the favorite toggle, so it does not stand alone on `6dacef7` - `pr/pr-stream-start-on-resume.md` |
 | position a seek asked for | inside `fix/position-after-disconnect` (`759b462`) | written on top of `PositionChangeRequests`; ported by hand, see `pr/pr-position-after-seek.md` |
 
 Rebase state: `feature/nowplaying-favorite-toggle` was rebased onto `6dacef7` and squashed to one
