@@ -21,12 +21,13 @@ import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 
 /**
- * Requests the currently playing track including its URL. The URL is not part of the menu flavored
- * status response the UI uses, but is needed for the favorites commands.
+ * Requests the currently playing track including its ID and URL. Neither is part of the menu
+ * flavored status response the UI uses, but they are needed for the favorites commands and for
+ * downloading the currently playing file (see LocalPlaybackService).
  */
 class CurrentTrackInfoRequest(playerId: PlayerId) :
     Request(playerId, PagingParams.Status, "status") {
     init {
-        params["tags"] = "tu"
+        params["tags"] = "tiud"
     }
 }

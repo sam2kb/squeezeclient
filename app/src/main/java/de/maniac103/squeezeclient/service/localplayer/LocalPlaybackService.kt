@@ -64,6 +64,7 @@ import kotlin.time.DurationUnit
 import kotlin.time.ExperimentalTime
 import kotlin.time.toDuration
 import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
@@ -73,6 +74,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Response
 
 @OptIn(ExperimentalTime::class)
@@ -82,6 +84,7 @@ class LocalPlaybackService :
     private val dispatcher = ServiceLifecycleDispatcher(this)
     private lateinit var slimproto: SlimprotoSocket
     private lateinit var player: LocalPlayer
+    private lateinit var streamStartStore: StreamPrefixStore
 
     private var startupTimestampNanos = 0L
 
@@ -118,10 +121,30 @@ class LocalPlaybackService :
 
     /** The song the position currently refers to. */
     private var lastSongGeneration = 0
+
+    /** Whether the stream start of the stream we play is currently being looked up. */
+    private var streamStartLoadActive = false
+
+    /** Set when looking the stream start up for the current stream failed; do not retry it. */
+    private var streamStartLoadFailed = false
+
+    /** Stream start captured for a stream whose track is not identified yet. */
+    private var pendingStreamStart: PendingStreamStart? = null
+
+    /** The job that stores [pendingStreamStart] once the server can be queried. */
+    private var streamStartStoreJob: Job? = null
+
+    /** A stream start waiting for the server to tell which track it belongs to. */
+    private data class PendingStreamStart(
+        val bytes: ByteArray,
+        val duration: Double?,
+        val fromPreloadStream: Boolean
+    )
     override fun onCreate() {
         dispatcher.onServicePreSuperOnCreate()
         super.onCreate()
         slimproto = SlimprotoSocket(prefs)
+        streamStartStore = StreamPrefixStore(this)
         player = LocalPlayer(
             this,
             onPlaybackReady = { buffering -> onPlaybackReady(buffering) },
@@ -133,7 +156,11 @@ class LocalPlaybackService :
             onDecoderLoadFinished = { onDecoderLoadFinished() },
             onDecodingFinished = { onDecodingFinished() },
             onHeadersReceived = { resp -> onHeadersReceived(resp) },
-            onMetadataReceived = { title, artworkUri -> onMetadataReceived(title, artworkUri) }
+            onMetadataReceived = { title, artworkUri -> onMetadataReceived(title, artworkUri) },
+            onStreamStartNeeded = { provideStreamStart() },
+            onStreamStartCaptured = { streamStart, duration, fromPreloadStream ->
+                storeStreamStart(streamStart, duration, fromPreloadStream)
+            }
         )
         startupTimestampNanos = System.nanoTime()
     }
@@ -503,6 +530,107 @@ class LocalPlaybackService :
         return position
     }
 
+    /**
+     * A stream that resumes somewhere inside a track does not contain the start of that track's
+     * file, and containers that keep what a decoder needs there (FLAC, Ogg) cannot be decoded
+     * without it (see [StreamContainer]). Playback would then fail, which makes the server stop
+     * and restart the stream (lacking the start just the same), so hand the player the stream
+     * start that was stored when that track started.
+     *
+     * @return whether the player should wait for the stream start to arrive
+     */
+    private fun provideStreamStart(): Boolean {
+        if (streamStartLoadActive) {
+            return true // The stream start of the lookup in flight will land in the cache
+        }
+        if (streamStartLoadFailed) {
+            return false // Not worth waiting again; a new stream gets a new attempt
+        }
+        streamStartLoadActive = true
+        lifecycleScope.launch {
+            try {
+                // The request needs CometD, which is still connecting right after an app start,
+                // so retry as long as the player waits for the stream start.
+                repeat(TRACK_QUERY_ATTEMPTS) {
+                    val trackResult = runCatching {
+                        connectionHelper.getCurrentTrackInfo(slimproto.playerId)
+                    }
+                    val trackId = trackResult.getOrNull()?.id
+                    if (trackId != null) {
+                        val streamStart = withContext(Dispatchers.IO) {
+                            streamStartStore.load(trackId)
+                        }
+                        if (streamStart != null) {
+                            Diag.log("local", "using the stored stream start for our stream")
+                            player.publishStreamStart(streamStart)
+                        } else {
+                            Diag.log("local", "no stored stream start for our stream")
+                            streamStartLoadFailed = true
+                        }
+                        return@launch
+                    }
+                    delay(TRACK_QUERY_RETRY_DELAY)
+                }
+                Diag.log("local", "could not ask the server for the track to load the start for")
+            } finally {
+                streamStartLoadActive = false
+            }
+        }
+        return true
+    }
+
+    /**
+     * Stores the start of a stream that began at the start of a file for the track it belongs to,
+     * so it is available when that track is resumed without it.
+     *
+     * The player also reads the stream of the next track early (for gapless playback), and the
+     * server may not report that one as current yet: such a stream is only stored when the
+     * container states the duration of its file, which identifies the track it belongs to. The
+     * same holds for the stream of the track that plays, as the server can be one status ahead.
+     */
+    private fun storeStreamStart(
+        streamStart: ByteArray,
+        duration: Double?,
+        fromPreloadStream: Boolean
+    ) {
+        pendingStreamStart = PendingStreamStart(streamStart, duration, fromPreloadStream)
+        if (streamStartStoreJob?.isActive == true) {
+            return // The running attempt picks the new stream start up
+        }
+        streamStartStoreJob = lifecycleScope.launch {
+            // The request needs CometD, which is still connecting right after an app start
+            repeat(TRACK_QUERY_ATTEMPTS) {
+                val pending = pendingStreamStart ?: return@launch
+                val trackResult = runCatching {
+                    connectionHelper.getCurrentTrackInfo(slimproto.playerId)
+                }
+                val track = trackResult.getOrNull()
+                if (track?.id != null) {
+                    val durationMatches = pending.duration != null && track.duration != null &&
+                        (pending.duration - track.duration).absoluteValue <=
+                        STREAM_START_DURATION_TOLERANCE
+                    // A stream the server did not start for us can still belong to the track it
+                    // plays when the container does not state a duration to compare.
+                    val belongsToCurrentTrack = durationMatches ||
+                        (pending.duration == null && !pending.fromPreloadStream)
+                    if (belongsToCurrentTrack) {
+                        withContext(Dispatchers.IO) {
+                            streamStartStore.store(track.id, pending.bytes)
+                        }
+                        Diag.log("local", "stored the stream start of the track we play")
+                    } else {
+                        Diag.log("local", "not storing the stream start: it is for another track")
+                    }
+                    pendingStreamStart = null
+                    return@launch
+                }
+                delay(TRACK_QUERY_RETRY_DELAY)
+            }
+            pendingStreamStart = null
+            Diag.log("local", "could not ask the server which track to store the stream start for")
+        }
+    }
+
     @androidx.annotation.OptIn(UnstableApi::class)
     private suspend fun sendStatus(type: SlimprotoSocket.StatusType) {
         val nowNanos = System.nanoTime()
@@ -585,6 +713,7 @@ class LocalPlaybackService :
                 streamInterrupted = false
                 streamResumesAfterPause = false
                 handOffPending = false
+                streamStartLoadFailed = false
                 sendStatus(SlimprotoSocket.StatusType.Connecting)
                 currentStreamUri = command.uri.toString()
                 streamStartRealtime = SystemClock.elapsedRealtime()
@@ -715,6 +844,15 @@ class LocalPlaybackService :
 
         /** Delay between two hand-off attempts. */
         private val HAND_OFF_RETRY_DELAY = 2.seconds
+
+        /** Tolerance when matching a stored stream start against the server's track duration. */
+        private const val STREAM_START_DURATION_TOLERANCE = 2.0
+
+        /** How often the server is asked for the current track before giving up. */
+        private const val TRACK_QUERY_ATTEMPTS = 6
+
+        /** Delay between two attempts to ask the server for the current track. */
+        private val TRACK_QUERY_RETRY_DELAY = 500.milliseconds
 
         /** Time window in which a stream started by the server is still considered a restart. */
         private val SEEK_RESTART_WINDOW = 5.seconds

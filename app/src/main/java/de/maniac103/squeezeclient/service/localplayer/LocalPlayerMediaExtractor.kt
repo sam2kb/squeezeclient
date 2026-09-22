@@ -37,7 +37,9 @@ import kotlin.collections.emptyList
 @UnstableApi
 class LocalPlayerMediaExtractor(
     private val mimeType: String,
-    private val flacMetadataCache: FlacMetadataCache
+    private val streamStartCache: StreamStartCache,
+    private val onStreamStartNeeded: () -> Boolean = { false },
+    private val onStreamStartCaptured: (ByteArray, Double?) -> Unit = { _, _ -> }
 ) : ProgressiveMediaExtractor {
     private var extractor: Extractor? = null
     private var extractorInput: ExtractorInput? = null
@@ -65,11 +67,15 @@ class LocalPlayerMediaExtractor(
                 emptyList()
             )
         }
-        val actualDataReader = if (uri.path == "/stream.mp3" && mimeType == "audio/flac") {
-            FlacMetadataCachingDataReader(dataReader, flacMetadataCache)
-        } else {
-            dataReader
-        }
+        val actualDataReader = streamContainer(uri)?.let { container ->
+            StreamPrefixCachingDataReader(
+                dataReader,
+                container,
+                streamStartCache,
+                onStreamStartNeeded,
+                onStreamStartCaptured
+            )
+        } ?: dataReader
         extractor.init(output)
         this.extractor = extractor
         this.extractorInput = DefaultExtractorInput(actualDataReader, position, length)
@@ -79,6 +85,22 @@ class LocalPlayerMediaExtractor(
         extractor?.release()
         extractor = null
         extractorInput = null
+    }
+
+    /**
+     * The container of the stream [uri] points to, as far as the player needs to know about it;
+     * null when streams of that container can start anywhere. Files the player plays on its own
+     * are seekable, so only the server's streaming endpoint needs its start replayed.
+     */
+    private fun streamContainer(uri: Uri): StreamContainer? {
+        if (uri.path != STREAMING_ENDPOINT_PATH) {
+            return null
+        }
+        return when (mimeType) {
+            "audio/flac" -> FlacStreamContainer
+            "audio/ogg" -> OggStreamContainer
+            else -> null
+        }
     }
 
     override fun disableSeekingOnMp3Streams() {
@@ -95,5 +117,10 @@ class LocalPlayerMediaExtractor(
     override fun read(positionHolder: PositionHolder): Int {
         val input = requireNotNull(extractorInput)
         return requireNotNull(extractor).read(input, positionHolder)
+    }
+
+    private companion object {
+        /** The path of the endpoint the server streams files from. */
+        private const val STREAMING_ENDPOINT_PATH = "/stream.mp3"
     }
 }

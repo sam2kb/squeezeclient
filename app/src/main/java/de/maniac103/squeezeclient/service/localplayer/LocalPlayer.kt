@@ -71,13 +71,15 @@ class LocalPlayer(
     onDecodingFinished: () -> Unit = {},
     onAudioStreamFlushed: () -> Unit = {},
     private val onHeadersReceived: (response: Response) -> Unit = {},
-    private val onMetadataReceived: (title: CharSequence, artworkUri: Uri?) -> Unit = { _, _ -> }
+    private val onMetadataReceived: (title: CharSequence, artworkUri: Uri?) -> Unit = { _, _ -> },
+    private val onStreamStartNeeded: () -> Boolean = { false },
+    private val onStreamStartCaptured: (ByteArray, Double?, Boolean) -> Unit = { _, _, _ -> }
 ) : Player.Listener {
     private val prefs = context.prefs
     private val dataSourceFactory: HttpDataSource.Factory
     private val player: ExoPlayer
     private var lastPlaybackState = Player.STATE_IDLE
-    private val flacMetadataCache = FlacMetadataCache()
+    private val streamStartCache = StreamStartCache()
 
     @UnstableApi
     private lateinit var transferListener: NetworkTransferListener
@@ -203,6 +205,11 @@ class LocalPlayer(
         autoStart: Boolean,
         replace: Boolean = false
     ) {
+        // A restarted stream replaces the one we play, while a stream for the next playlist item
+        // is appended (that is how gapless transitions are pre-buffered). An appended stream
+        // belongs to a track the server may not report as current yet, so the capture of the
+        // stream start has to tell the two kinds of stream apart.
+        val replaceCurrentStream = replace || player.playbackState == Player.STATE_IDLE
         val mediaItem = MediaItem.Builder()
             .setUri(uri)
             .setMimeType(mimeType)
@@ -217,7 +224,14 @@ class LocalPlayer(
             if (mimeType == null) {
                 BundledExtractorsAdapter(DefaultExtractorsFactory())
             } else {
-                LocalPlayerMediaExtractor(mimeType, flacMetadataCache)
+                LocalPlayerMediaExtractor(
+                    mimeType,
+                    streamStartCache,
+                    onStreamStartNeeded,
+                    onStreamStartCaptured = { streamStart, duration ->
+                        onStreamStartCaptured(streamStart, duration, !replaceCurrentStream)
+                    }
+                )
             }
         }
 
@@ -231,7 +245,7 @@ class LocalPlayer(
 
         // A restarted stream replaces the one we play, while a stream for the next playlist item
         // is appended (that is how gapless transitions are pre-buffered).
-        if (replace || player.playbackState == Player.STATE_IDLE) {
+        if (replaceCurrentStream) {
             player.setMediaSource(mediaSource)
             player.prepare()
             player.playWhenReady = autoStart
@@ -243,6 +257,12 @@ class LocalPlayer(
     fun stop() {
         player.stop()
     }
+
+    /**
+     * Publishes FLAC metadata fetched from the server (the server sends it only when a stream
+     * starts at the beginning of a file, see StreamPrefixCachingDataReader).
+     */
+    fun publishStreamStart(streamStart: ByteArray) = streamStartCache.publish(streamStart)
 
     @OptIn(UnstableApi::class)
     fun skipAhead(duration: Duration) {
