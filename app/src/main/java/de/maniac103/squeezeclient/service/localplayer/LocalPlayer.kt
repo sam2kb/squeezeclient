@@ -409,7 +409,7 @@ class LocalPlayer(
         // LMS also repeats the value its ramp stopped at when a subscription is renewed, and that
         // can be far below the mixer volume. While nothing plays the user cannot hear such a
         // change, so a lower volume in that state is the ramp's leftover, not a choice.
-        if (!isPlaying && value < (lastSetVolume ?: 1F)) {
+        if (!isPlaying && lastSetVolume?.let { value < it } == true) {
             return true
         }
         return prefs.localPlayerVolumeMode != LocalPlayerVolumeMode.PlayerOnly && !isPlaying
