@@ -439,6 +439,9 @@ class LocalPlaybackService :
         Diag.log("local", "song changed, counting from 0 again")
     }
 
+    /** Counts the streams the server started, so delayed work can check it still applies. */
+    private var streamGeneration = 0
+
     /**
      * The server restarts a stream at the position it chose. When that position is inside the
      * song (it restores a session, or its stream resumes somewhere in the middle), adopt it so
@@ -448,9 +451,9 @@ class LocalPlaybackService :
      */
     private fun checkServerPositionAfterRestart(previousPosition: Duration) =
         lifecycleScope.launch {
-            val streamUri = currentStreamUri
+            val generation = streamGeneration
             delay(RESTART_STATUS_DELAY)
-            if (currentStreamUri != streamUri) {
+            if (generation != streamGeneration) {
                 return@launch // Another stream started in the meantime
             }
             val serverPosition = fetchServerPosition() ?: return@launch
@@ -473,10 +476,10 @@ class LocalPlaybackService :
      * a connection loss.
      */
     private fun handOffPositionToServer(restartPosition: Duration) = lifecycleScope.launch {
-        val streamUri = currentStreamUri
+        val generation = streamGeneration
         val startedAt = SystemClock.elapsedRealtime()
         repeat(HAND_OFF_ATTEMPTS) {
-            if (streamUri != currentStreamUri) {
+            if (generation != streamGeneration) {
                 return@launch // Another stream started in the meantime
             }
             // The player's timeline is reset asynchronously when the new stream starts, so
@@ -682,6 +685,10 @@ class LocalPlaybackService :
 
             is SlimprotoSocket.CommandPacket.StreamStart -> {
                 val previousPosition = playerPosition()
+                // The position we asked the server for, when this stream start is the consequence
+                // of that request: it is where the stream plays, unlike the server's own position
+                // (see PositionChangeRequests).
+                val requestedPosition = PositionChangeRequests.requestedPosition()
                 // The server restarts its stream on a connection loss; that continues our
                 // stream, so keep counting from our position instead of restarting at zero.
                 // A stream the server starts right after we asked for a different position or
@@ -694,14 +701,17 @@ class LocalPlaybackService :
                     command.uri.toString() == currentStreamUri && streamContinues
                 // The server resumes at the position it deduced itself, which can be ahead of
                 // what we played: it assumes everything it sent was consumed, and it keeps
-                // counting while we are not connected. Ask it to use our position instead.
-                val handOffPosition = continuesCurrentStream &&
-                    (streamInterrupted || streamResumesAfterPause)
+                // counting while we are not connected. A stream that continues an interrupted
+                // one, or one that resumes after a pause, therefore always gets our position -
+                // even when a position request happened right before, as its stream may have
+                // started from a position the server got wrong in the meantime.
+                val handOffPosition = streamInterrupted || streamResumesAfterPause
                 Diag.log(
                     "local",
                     "strm-s uri=${command.uri} autoStart=${command.autoStart} " +
                         "direct=${command.directStreaming} position=$previousPosition " +
-                        "continues=$continuesCurrentStream handOff=$handOffPosition"
+                        "continues=$continuesCurrentStream handOff=$handOffPosition " +
+                        "requested=$requestedPosition"
                 )
                 // Server-initiated restarts can arrive in bursts; keep treating them as one
                 // continuation, so the position stays continuous across the whole burst.
@@ -716,18 +726,20 @@ class LocalPlaybackService :
                 streamStartLoadFailed = false
                 sendStatus(SlimprotoSocket.StatusType.Connecting)
                 currentStreamUri = command.uri.toString()
+                streamGeneration++
                 streamStartRealtime = SystemClock.elapsedRealtime()
                 // The player's timeline starts at zero with the new stream, so our position in
-                // the restarted stream simply is where we were when it ended.
-                streamStartPosition = if (continuesCurrentStream) {
-                    previousPosition
-                } else {
-                    Duration.ZERO
+                // the restarted stream simply is where we were when it ended - or the position
+                // we asked the server for, when this stream is the answer to that request.
+                streamStartPosition = when {
+                    continuesCurrentStream -> previousPosition
+                    requestedPosition != null -> requestedPosition.seconds
+                    else -> Duration.ZERO
                 }
                 lastPlayerPositionRealtime = 0
                 if (handOffPosition) {
                     handOffPositionToServer(previousPosition)
-                } else if (!continuesCurrentStream) {
+                } else if (!continuesCurrentStream && requestedPosition == null) {
                     checkServerPositionAfterRestart(previousPosition)
                 }
                 sentTrackStartStatus = false // new strm-s requires new STMs to be sent

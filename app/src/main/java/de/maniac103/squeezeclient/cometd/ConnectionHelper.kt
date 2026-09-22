@@ -341,7 +341,7 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
     suspend fun sendButtonRequest(request: PlaybackButtonRequest) = publishOneShotRequest(request)
 
     suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) {
-        PositionChangeRequests.note()
+        PositionChangeRequests.note(positionSeconds)
         publishOneShotRequest(SetPlaybackPositionRequest(playerId, positionSeconds))
     }
 
