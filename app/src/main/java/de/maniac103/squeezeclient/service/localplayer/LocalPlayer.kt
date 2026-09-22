@@ -105,7 +105,7 @@ class LocalPlayer(
     var volume: Float
         get() = lastSetVolume ?: 0F
         set(value) {
-            if (isServerVolumeFade()) {
+            if (isServerVolumeFade(value)) {
                 // The server ramps its volume when playback is paused or resumed, and it
                 // announces its volume when a stream is set up or stopped. Ignore the ramp
                 // completely: following it leaves playback at whatever value the ramp was cut
@@ -397,13 +397,19 @@ class LocalPlayer(
      * stream is set up or stopped; in the modes driving the device volume, neither may become
      * the volume the device is set to.
      */
-    private fun isServerVolumeFade(): Boolean {
+    private fun isServerVolumeFade(value: Float): Boolean {
         val now = SystemClock.uptimeMillis()
         // The ramp consists of several values; every one of them re-arms the window, so a fade
         // that lasts longer than the window around the toggle still counts as one.
         if (now - lastPauseToggle <= PAUSE_FADE_WINDOW_TIME ||
             now - lastFadeVolume <= PAUSE_FADE_WINDOW_TIME
         ) {
+            return true
+        }
+        // LMS also repeats the value its ramp stopped at when a subscription is renewed, and that
+        // can be far below the mixer volume. While nothing plays the user cannot hear such a
+        // change, so a lower volume in that state is the ramp's leftover, not a choice.
+        if (!isPlaying && value < (lastSetVolume ?: 1F)) {
             return true
         }
         return prefs.localPlayerVolumeMode != LocalPlayerVolumeMode.PlayerOnly && !isPlaying
