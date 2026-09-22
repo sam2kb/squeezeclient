@@ -29,8 +29,9 @@ steps, and a stream restart after a network blip set it to the server's mixer vo
 
 **Suggested minimal change** (implement however you prefer):
 - treat a volume that arrives right after a playback state toggle, or while nothing is playing, as
-  a fade: play it (so the ramp stays audible), but neither record it nor apply it to the device
-  volume;
+  a fade: ignore it entirely: following the ramp leaves playback at whatever value the ramp was
+  cut off at (a dropped connection can cut it off at zero) and recording or applying it changes
+  the volume the user chose;
 - adopt the volume the device is currently set to when the playback state toggles, when a stream
   is set up or stopped, and when the device volume changed externally - the user's volume is what
   playback continues with.
