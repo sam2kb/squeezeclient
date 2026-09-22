@@ -16,7 +16,7 @@ upstream. Nothing here is proposed upstream yet.
 | --- | --- | --- | --- | --- |
 | `fix/cometd-request-while-disconnected` | `9df2bbc` | CometD: Don't crash when a request is submitted while disconnected | 2 files, +22/-3 | `pr/pr-cometd-crash.md` |
 | `fix/local-position-display` | `9fbb028` | Show the position the local player plays instead of the server's estimate | 4 files, +108/-10 | `pr/pr-local-position-display.md` |
-| `fix/mediasession-next-at-playlist-end` | `c5dab2f` | Media session: Keep the reported playlist index inside the list | 1 file, +21/-7 | `pr/pr-mediasession-next-at-end.md` |
+| `fix/mediasession-next-at-playlist-end` | `8317f8c` | Media session: Keep the reported playlist index inside the list | 1 file, +20/-7 | `pr/pr-mediasession-next-at-end.md` |
 | `fix/mediasession-pending-track` | `4f3caf6` | Report the expected song for our own track changes | 1 file, +35/-8 | `pr/pr-pending-track-flap.md` |
 | `fix/position-after-disconnect` | `cab626b` | Local player: Keep the position across a server-initiated stream restart | 5 files, +275/-5 | `pr/pr-position-after-disconnect.md` |
 | `fix/session-reannounce` | `a6b1af8` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
@@ -45,7 +45,7 @@ Its claims were checked against the code and what held up was fixed in the draft
   exceptions this request path produces and rethrows cancellation (the old `catch (e: Exception)`
   turned bugs into an empty list and swallowed Paging's cancellation); the subscription flow's
   initial-request catch now really does catch every failure, as its comment claims.
-- `fix/mediasession-next-at-playlist-end` `c5dab2f` - an empty playlist window no longer falls into
+- `fix/mediasession-next-at-playlist-end` `8317f8c` - an empty playlist window no longer falls into
   the clamp (`coerceIn(n, n-1)` throws; now `takeIf { it.items.isNotEmpty() }`), and the skip
   commands are advertised against the server's track count instead of the published window, so a
   truncated playlist does not hide Next.
@@ -67,8 +67,9 @@ paused-time semantics and the 2 s window want a decision; a fade should not be w
 internal volume), `fix/mediasession-pending-track` (prefer the review's smaller form of the
 prediction lifetime), `fix/slider-drag` (watchdog for `userSeeking`), and the stream-start draft
 (attribution: a 2 s duration coincidence can still key the wrong track; the Ogg half should wait
-for a real reproduction). The check report below was generated before this pass and is being
-regenerated.
+for a real reproduction). The conflict table below reflects this pass: adding the track-change
+`note()` calls to `fix/position-after-disconnect` made it touch `SqueezeboxMediaPlayer.kt` too, which
+is where `fix/mediasession-pending-track` and `fix/local-position-display` already conflict with it.
 
 ## Obsolete (not in the review set, not pushed again)
 
@@ -132,9 +133,11 @@ LMS at `http://10.10.2.45:31101/jsonrpc.js`, player id `50:85:82:13:79:5c`, app 
    of untouched code, no AI-flavoured prose).
 4. Does the PR text carry problem, mechanism, evidence (log lines), reproduction and the exact
    change? The maintainer asks for measurable evidence, not adjectives.
-5. Does it conflict with another draft that would land first? There are three such pairs, all with
-   `fix/local-position-display` (see the report and the PR texts) - the second PR always needs a
-   rebase, and saying so in the PR text is part of the story.
+5. Does it conflict with another draft that would land first? Four pairs do, each in one or two
+   hunks: `fix/local-position-display` with `fix/slider-drag`, with `fix/position-after-disconnect`
+   (two files) and with `fix/mediasession-pending-track`, plus `fix/mediasession-pending-track` with
+   `fix/position-after-disconnect` (both touch the Next/Previous handlers). The second PR of each
+   pair needs that rebase, and saying so in the PR text is part of the story.
 6. Does it need a unit test? Upstream tests the extractors under `app/src/test`; local player
    changes usually should come with one (the stream start draft has 8).
 

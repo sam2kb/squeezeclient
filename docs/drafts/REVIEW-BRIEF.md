@@ -149,8 +149,9 @@ most recent four), and a stream that resumes inside a file is given the stored s
 | pair | file | note |
 | --- | --- | --- |
 | `fix/local-position-display` + `fix/slider-drag` | `ui/nowplaying/NowPlayingFragment.kt` | both edit where positions are applied to the slider |
-| `fix/local-position-display` + `fix/position-after-disconnect` | `service/localplayer/LocalPlaybackService.kt` | the position calculation vs the code that replaces parts of it |
+| `fix/local-position-display` + `fix/position-after-disconnect` | `service/localplayer/LocalPlaybackService.kt`, `service/mediasession/SqueezeboxMediaPlayer.kt` | the position calculation vs the code that replaces parts of it, plus the track-change `note()` calls |
 | `fix/local-position-display` + `fix/mediasession-pending-track` | `service/mediasession/SqueezeboxMediaPlayer.kt` | both add lines in the same place |
+| `fix/mediasession-pending-track` + `fix/position-after-disconnect` | `service/mediasession/SqueezeboxMediaPlayer.kt` | both edit the Next/Previous handlers |
 
-Each is a single small hunk; whichever lands second needs that one hunk resolved. Every other pair
+Each is one or two small hunks; whichever lands second needs those resolved. Every other pair
 merges cleanly (see `check-report.txt`).
