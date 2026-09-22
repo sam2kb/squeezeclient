@@ -106,10 +106,10 @@ class LocalPlayer(
         set(value) {
             if (isServerVolumeFade()) {
                 // The server ramps its volume when playback is paused or resumed, and it
-                // announces its volume when a stream is set up or stopped. Play the ramp, but
-                // do not record it: the volume the user chose must survive the toggle, and the
-                // announcement must not overwrite it either.
-                playerInternalVolume = value
+                // announces its volume when a stream is set up or stopped. Follow the ramp for
+                // what is played, but record nothing: neither the volume the user chose nor the
+                // device volume may end up with a value from the ramp.
+                lastFadeVolume = SystemClock.uptimeMillis()
                 player.volume = value * currentReplayGain
                 return
             }
@@ -118,6 +118,7 @@ class LocalPlayer(
         }
 
     private var lastSetVolume: Float? = null
+    private var lastFadeVolume = 0L
     private var playerInternalVolume = 1F
     private var currentReplayGain = 1F
     private var lastSavedDeviceVolume: Int? = null
@@ -392,7 +393,12 @@ class LocalPlayer(
      * the volume the device is set to.
      */
     private fun isServerVolumeFade(): Boolean {
-        if (SystemClock.uptimeMillis() - lastPauseToggle <= PAUSE_FADE_WINDOW_TIME) {
+        val now = SystemClock.uptimeMillis()
+        // The ramp consists of several values; every one of them re-arms the window, so a fade
+        // that lasts longer than the window around the toggle still counts as one.
+        if (now - lastPauseToggle <= PAUSE_FADE_WINDOW_TIME ||
+            now - lastFadeVolume <= PAUSE_FADE_WINDOW_TIME
+        ) {
             return true
         }
         return prefs.localPlayerVolumeMode != LocalPlayerVolumeMode.PlayerOnly && !isPlaying
