@@ -2,9 +2,8 @@
 
 **Reviewed against** upstream `6dacef7`, branch tip `a6b1af8`, diff 1 file +28. Read-only review; no build was run here (see `reviews/README.md`).
 
-The diff acts on media3 1.11.1 (`gradle/libs.versions.toml:15`) and the platform media session, so I read both: media3's `libraries/session`
-sources and AOSP 14's `services/core/java/com/android/server/media` sources, fetched with `curl` into `/tmp/m3` (`.../androidx/media/1.11.1/...`,
-`.../aosp-mirror/platform_frameworks_base/android-14.0.0_r1/...`). **[verified]** = those sources or the branch; **[hypothesis]** = unverifiable here.
+I read both sides of this change: media3 1.11.1 (`gradle/libs.versions.toml:15`) `libraries/session` and AOSP 14 `services/core/java/com/android/server/media`
+sources, fetched with `curl` into `/tmp/m3` (`androidx/media` 1.11.1, `aosp-mirror/platform_frameworks_base` android-14.0.0_r1). **[verified]** = those sources or the branch.
 
 **Verdict.** The report is credible, but the fix pulls the wrong lever: `removeSession`/`addSession` are service-local bookkeeping and never
 re-register or re-activate the framework session a Bluetooth stack reads, so the "re-announcement" cannot reach the input a head unit consults.
@@ -25,6 +24,11 @@ activates it exactly once — `sessionCompat.setActive(true)` in `MediaSessionLe
 pushes it only on session creation and active-flag changes (`:281, 688`) — none of which this code causes, so a stack reading
 `MediaSessionManager.getActiveSessions()` sees identical input before and after. Anything else the device keys off would have to be demonstrated
 (**[hypothesis]**).
+
+**What could explain the field report. [hypothesis, AOSP Bluetooth `main`]** AVRCP's `MediaPlayerList` enumerates sessions when the profile is
+constructed but pushes the available-players list to the car only in PTS mode, and a Bluetooth toggle tears the TG down and rebuilds it, so the car
+re-queries. That fits "nothing until the toggle" better than an unregistered session — and no app-level session call affects it. No primary bug report
+states the toggle condition; §7's Bluetooth log should confirm or kill this.
 
 **"Written against the older implementation" is not the issue.** `f94ebb8` was a mechanical split (527 deletions / 265 + 289 additions, no
 behaviour change), and the pre-move file already called `addSession(mediaSession)` in `onCreate` (pre-move `service/MediaService.kt:156`; today
