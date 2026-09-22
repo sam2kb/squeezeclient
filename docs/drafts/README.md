@@ -68,6 +68,13 @@ Its claims were checked against the code and what held up was fixed in the draft
   Verified on the device: pause and play move neither volume, and the log shows
   `volume: ignoring fade 0.30... (playing=false)`.
 
+  **Not yet in the draft** (added after the device round): the status volume (`vol`) is now the
+  authority - `LocalPlayerVolume` publishes it, the local player applies it, and a volume clearly
+  below it is ignored. Reason: LMS repeats the value its fade ramp stopped at on every subscription
+  renewal (observed 0.26 while the mixer said 40), which left playback quiet/muted depending on the
+  volume mode. `main` carries it; the draft needs the same before it is proposed, which also makes
+  the media player file part of this draft's conflict surface.
+
 Withdrawn, not for upstream: `fix/session-reannounce`. The review showed that media3's
 `addSession`/`removeSession` never release or re-activate the framework session a head unit reads,
 and the log line its PR text quoted comes from a different commit. The branch stays as a record.
