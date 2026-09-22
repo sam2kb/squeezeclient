@@ -36,14 +36,23 @@ steps, and a stream restart after a network blip set it to the server's mixer vo
   is set up or stopped, and when the device volume changed externally - the user's volume is what
   playback continues with.
 
-Diff: one file, +61 (`service/localplayer/LocalPlayer.kt`).
-Branch: `fix/volume-device-volume-fades` (`ba7f766`, off `upstream/main` `6dacef7`), pushed to the
+Diff: 3 files, +139 (`service/localplayer/LocalPlayer.kt`, `service/localplayer/LocalPlayerVolume.kt`
+(new), `service/mediasession/SqueezeboxMediaPlayer.kt`).
+Branch: `fix/volume-device-volume-fades` (`43379a8`, off `upstream/main` `6dacef7`), pushed to the
 fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`ba7f766`) on top of upstream `6dacef7`; it builds and lints on its own (see
-`docs/drafts/check-report.txt`). It does not conflict with any other draft.
+One commit (`43379a8`) on top of upstream `6dacef7`; it builds and lints on its own (see
+`docs/drafts/check-report.txt`). Two drafts conflict with it in
+`service/mediasession/SqueezeboxMediaPlayer.kt`, one small hunk each: `fix/local-position-display`
+(both add to the state that is published) and `fix/position-after-disconnect` (its seek handlers sit
+next to the advertised commands); whichever lands second rebases.
+
+It also carries what the review and the device runs after it asked for: the server's fade ramp is
+ignored rather than followed (a ramp can be cut off by a reconnect and leave playback at its last
+value), and the mixer volume from the player status is the authority - it is applied when it changes
+and a volume clearly below it is ignored, because the server repeats the value a ramp stopped at.
 
 An earlier and much larger attempt at the same problem is on `fix/volume-follow-device-changes`
 (an old PR #57, +203/-11 in the same file): it stays in the repository for reference but is

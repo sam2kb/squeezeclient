@@ -123,4 +123,7 @@ One commit (`759b462`) on top of upstream `6dacef7`; it builds and lints on its 
 and the same service code - the two belong in one PR anyway, they have no meaning apart.
 
 It conflicts with `fix/local-position-display` in `service/localplayer/LocalPlaybackService.kt`
-(one small hunk: that draft adds the position calculation this draft replaces parts of).
+(one small hunk: that draft adds the position calculation this draft replaces parts of; the check
+also reports `service/mediasession/SqueezeboxMediaPlayer.kt` for that pair). It conflicts with
+`fix/volume-device-volume-fades` in `service/mediasession/SqueezeboxMediaPlayer.kt` as well - the
+status/command handling the volume draft adds sits next to the seek handlers.

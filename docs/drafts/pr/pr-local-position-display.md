@@ -76,14 +76,17 @@ Branch: `fix/local-position-display` (`9fbb028`, off `upstream/main` `6dacef7`),
 One commit (`9fbb028`) on top of upstream `6dacef7`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`).
 
-This is the oldest of the four drafts that touch position handling, and the three that were written
-later each conflict with it in one file when both are merged:
+This is the oldest of the four drafts that touch position handling, and the four that were written
+later each conflict with it when both are merged:
 
 - `fix/slider-drag` - `ui/nowplaying/NowPlayingFragment.kt` (both drafts edit where positions are
   applied to the slider),
-- `fix/position-after-disconnect` - `service/localplayer/LocalPlaybackService.kt`,
-- `fix/mediasession-pending-track` - `service/mediasession/SqueezeboxMediaPlayer.kt`.
+- `fix/position-after-disconnect` - `service/localplayer/LocalPlaybackService.kt` and
+  `service/mediasession/SqueezeboxMediaPlayer.kt`,
+- `fix/mediasession-pending-track` - `service/mediasession/SqueezeboxMediaPlayer.kt`,
+- `fix/volume-device-volume-fades` - `service/mediasession/SqueezeboxMediaPlayer.kt` (it publishes the
+  mixer volume where this draft also adds to the state).
 
 Each conflict is a single small hunk (the branches just add lines next to each other), so whichever
-of the pair lands second resolves it by rebasing; if this draft lands first, the other three need a
-one-hunk rebase.
+of the pair lands second resolves it by rebasing; if this draft lands first, the other four need a
+one-hunk rebase each.
