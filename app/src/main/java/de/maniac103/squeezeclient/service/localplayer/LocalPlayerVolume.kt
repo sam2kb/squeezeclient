@@ -27,4 +27,16 @@ package de.maniac103.squeezeclient.service.localplayer
 object LocalPlayerVolume {
     @Volatile
     var serverVolume: Int? = null
+        private set
+
+    /**
+     * Set by the local player, called with the mixer volume from the player status. The server's
+     * own volume messages can lag behind it, or repeat the value a fade ramp stopped at.
+     */
+    var listener: ((Int) -> Unit)? = null
+
+    fun publish(volume: Int?) {
+        serverVolume = volume
+        volume?.let { listener?.invoke(it) }
+    }
 }

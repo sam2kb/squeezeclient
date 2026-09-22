@@ -262,7 +262,7 @@ class SqueezeboxMediaPlayer(
             }
             add(COMMAND_STOP)
             // The mixer volume the user chose; the local player treats it as the authority.
-            LocalPlayerVolume.serverVolume = playerState.currentVolume
+            LocalPlayerVolume.publish(playerState.currentVolume)
             if (playerState.currentVolume != null) {
                 add(COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS)
                 add(COMMAND_GET_DEVICE_VOLUME)

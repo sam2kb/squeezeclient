@@ -102,6 +102,19 @@ class LocalPlayer(
     val readyForPlayback get() = player.playbackState == Player.STATE_READY
     val isPlaying get() = player.playbackState == Player.STATE_READY && player.playWhenReady
 
+    init {
+        // The status carries the mixer volume; apply it when the server's own volume messages do
+        // not match it (they can lag behind, or repeat the value a fade ramp stopped at).
+        LocalPlayerVolume.listener = { volume ->
+            val value = volume / 100f
+            if (value != lastSetVolume) {
+                Diag.log("volume", "mixer volume $value")
+                lastSetVolume = value
+                updatePlayerVolume(true)
+            }
+        }
+    }
+
     var volume: Float
         get() = lastSetVolume ?: 0F
         set(value) {
