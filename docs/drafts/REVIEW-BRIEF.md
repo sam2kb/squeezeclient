@@ -108,10 +108,12 @@ and adopts the device volume around state toggles and external volume changes.
 - Suspicious: it depends on the maintainer's rewritten volume handling (`updatePlayerVolume`,
   `lastSetVolume`); the 2 s window around toggles is a heuristic. An earlier, much larger attempt is
   on `fix/volume-follow-device-changes` (not part of the review set).
-- Follow-up (2026-09-22, after the review): the ramp's later steps arrived after the window and were
-  applied as the device volume (muting it after a pause). The fade is now followed for playback only,
-  is recorded nowhere, and re-arms its window, so the whole ramp counts as one - verified on the
-  device by pausing and watching the device volume stay put.
+- Follow-up (2026-09-22, after the review): two device reports traced to the ramp - its later steps
+  were applied as the device volume ("muted after pause"), and following it for playback left the
+  player volume at a near-zero step when the ramp was cut off by the ~60 s Cometd reconnect
+  ("play starts muted"). The ramp is now ignored entirely and re-arms its own window, so the whole
+  ramp counts as one; verified on the device with pause/play and the `volume: ignoring fade ...` log
+  line.
 
 ## `feature/nowplaying-favorite-toggle` (`6dc0c91`, 14 files)
 
