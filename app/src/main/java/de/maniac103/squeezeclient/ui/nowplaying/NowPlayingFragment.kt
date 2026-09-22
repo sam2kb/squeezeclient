@@ -70,6 +70,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 import kotlin.time.ExperimentalTime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -503,13 +504,22 @@ class NowPlayingFragment :
         updateFavoriteIcon()
 
         favoriteUpdateJob = lifecycleScope.launch {
-            val requestSucceeded = requestOrNull {
-                if (wasFavorite) {
-                    connectionHelper.removeFavorite(playerId, url, title)
-                } else {
-                    connectionHelper.addFavorite(playerId, url, title)
+            val requestSucceeded = try {
+                requestOrNull {
+                    if (wasFavorite) {
+                        connectionHelper.removeFavorite(playerId, url, title)
+                    } else {
+                        connectionHelper.addFavorite(playerId, url, title)
+                    }
+                } != null
+            } catch (e: CancellationException) {
+                // A connection level failure cancels this coroutine instead of throwing, so
+                // treat it as a failed write unless a newer tap replaced this job.
+                if (coroutineContext[Job] !== favoriteUpdateJob) {
+                    throw e
                 }
-            } != null
+                false
+            }
 
             if (!requestSucceeded) {
                 if (currentSong == song) {

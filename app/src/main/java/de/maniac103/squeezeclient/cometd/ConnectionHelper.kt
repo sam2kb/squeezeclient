@@ -632,10 +632,12 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
                     }
                     if (subscribed) {
                         // Not connected (yet); the subscription below delivers the state once
-                        // we are, so a failed request must not be fatal.
+                        // we are, so nothing the initial request can fail with must be fatal.
                         try {
                             requestMethod()?.let { emit(it) }
-                        } catch (e: CometdClient.CometdException) {
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
                             Log.d(TAG, "Could not request the initial state", e)
                         }
                         jobHolder.launch {
