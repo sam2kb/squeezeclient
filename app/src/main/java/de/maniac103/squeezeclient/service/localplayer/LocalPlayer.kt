@@ -49,6 +49,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.util.EventLogger
 import androidx.media3.extractor.DefaultExtractorsFactory
 import de.maniac103.squeezeclient.BuildConfig
+import de.maniac103.squeezeclient.Diag
 import de.maniac103.squeezeclient.extfuncs.LocalPlayerVolumeMode
 import de.maniac103.squeezeclient.extfuncs.httpClient
 import de.maniac103.squeezeclient.extfuncs.localPlayerVolumeMode
@@ -106,13 +107,17 @@ class LocalPlayer(
         set(value) {
             if (isServerVolumeFade()) {
                 // The server ramps its volume when playback is paused or resumed, and it
-                // announces its volume when a stream is set up or stopped. Follow the ramp for
-                // what is played, but record nothing: neither the volume the user chose nor the
-                // device volume may end up with a value from the ramp.
+                // announces its volume when a stream is set up or stopped. Ignore the ramp
+                // completely: following it leaves playback at whatever value the ramp was cut
+                // off at (a connection drop can cut it off at zero, which mutes playback), and
+                // recording or applying it changes the volume the user chose. Re-arming the
+                // window keeps the whole ramp - including the value it ends with - out of both
+                // the player volume and the device volume.
                 lastFadeVolume = SystemClock.uptimeMillis()
-                player.volume = value * currentReplayGain
+                Diag.log("volume", "ignoring fade $value (playing=$isPlaying)")
                 return
             }
+            Diag.log("volume", "server volume $value")
             lastSetVolume = value
             updatePlayerVolume(true)
         }
