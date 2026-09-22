@@ -25,7 +25,7 @@ upstream. Nothing here is proposed upstream yet.
 | `fix/position-after-disconnect` | `cab626b` | Local player: Keep the position across a server-initiated stream restart | 5 files, +275/-5 | `pr/pr-position-after-disconnect.md` |
 | `fix/session-reannounce` | `a6b1af8` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
 | `fix/slider-drag` | `3d4c247` | Now playing: Don't let status updates fight the position slider | 1 file, +95/-5 | `pr/pr-slider-drag.md` |
-| `fix/volume-device-volume-fades` | `ba7f766` | Local player: Keep the device volume across playback state changes | 1 file, +61 | `pr/pr-volume-fades.md` |
+| `fix/volume-device-volume-fades` | `00be99a` | Local player: Keep the device volume across playback state changes | 1 file, +67 | `pr/pr-volume-fades.md` |
 | `feature/nowplaying-favorite-toggle` | `41636bd` | Now playing: Add a one tap favorite toggle | 14 files, +437/-13 | PR body is on the fork (this branch had one before) |
 
 Two more drafts have no branch of their own:
@@ -59,6 +59,11 @@ Its claims were checked against the code and what held up was fixed in the draft
 - `feature/nowplaying-favorite-toggle` `41636bd` - a failed write is a failure again: the connection
   helper reports a request failure by cancelling the coroutine, which used to skip the rollback and
   leave the icon flipped with no message.
+- `fix/volume-device-volume-fades` `00be99a` - the fade is followed for what is played (`player.volume`)
+  but recorded nowhere and never applied to the device volume, and every fade value re-arms the
+  window, so a ramp that outlasts the 2 s around a toggle still counts as one. Reported on the
+  device as "volume muted after pause": the later steps of the ramp were treated as normal volume
+  changes and became the device volume. Verified on the device: pausing no longer moves it.
 
 Withdrawn, not for upstream: `fix/session-reannounce`. The review showed that media3's
 `addSession`/`removeSession` never release or re-activate the framework session a head unit reads,

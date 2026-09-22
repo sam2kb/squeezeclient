@@ -108,6 +108,10 @@ and adopts the device volume around state toggles and external volume changes.
 - Suspicious: it depends on the maintainer's rewritten volume handling (`updatePlayerVolume`,
   `lastSetVolume`); the 2 s window around toggles is a heuristic. An earlier, much larger attempt is
   on `fix/volume-follow-device-changes` (not part of the review set).
+- Follow-up (2026-09-22, after the review): the ramp's later steps arrived after the window and were
+  applied as the device volume (muting it after a pause). The fade is now followed for playback only,
+  is recorded nowhere, and re-arms its window, so the whole ramp counts as one - verified on the
+  device by pausing and watching the device volume stay put.
 
 ## `feature/nowplaying-favorite-toggle` (`6dc0c91`, 14 files)
 
