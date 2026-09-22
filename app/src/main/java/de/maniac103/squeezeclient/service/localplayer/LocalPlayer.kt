@@ -117,6 +117,14 @@ class LocalPlayer(
                 Diag.log("volume", "ignoring fade $value (playing=$isPlaying)")
                 return
             }
+            // The server also repeats the value a fade ramp stopped at, which can be far below
+            // its mixer volume. The mixer volume from the status is the authority for the volume
+            // the user chose, so anything clearly below it is such a leftover, not a choice.
+            val mixerVolume = LocalPlayerVolume.serverVolume
+            if (mixerVolume != null && value * 100f < mixerVolume - VOLUME_MATCH_TOLERANCE) {
+                Diag.log("volume", "ignoring $value, the mixer is at $mixerVolume")
+                return
+            }
             Diag.log("volume", "server volume $value")
             lastSetVolume = value
             updatePlayerVolume(true)
@@ -520,5 +528,6 @@ class LocalPlayer(
 
         /** Time after a pause toggle in which a volume the server sends is considered a fade. */
         private const val PAUSE_FADE_WINDOW_TIME = 2000L
+        private const val VOLUME_MATCH_TOLERANCE = 5f
     }
 }
