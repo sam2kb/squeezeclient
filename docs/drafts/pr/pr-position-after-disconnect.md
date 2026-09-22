@@ -109,7 +109,7 @@ After the fix, the same scenario: hand-off fired (`server=97 ours=1m28.627s diff
 player resumed, the position kept following the audio (no backwards jumps) and the device volume
 was untouched.
 
-Diff: 4 files, +251 / -5 (`service/localplayer/LocalPlaybackService.kt`,
+Diff: 4 files, +274 / -5 (`service/localplayer/LocalPlaybackService.kt`,
 `service/localplayer/LocalPlayer.kt`, `cometd/ConnectionHelper.kt`,
 `service/localplayer/PositionChangeRequests.kt` (new)).
 Branch: `fix/position-after-disconnect` (`759b462`, off `upstream/main` `6dacef7`), pushed to the

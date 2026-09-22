@@ -54,7 +54,7 @@ for ~1.3 s after a track change (the "new -> old -> new" flap on head units).
   state should ideally be cleared reliably (it waits for the server to confirm the song). Conflicts
   with `fix/local-position-display` in `SqueezeboxMediaPlayer.kt` (one hunk).
 
-## `fix/position-after-disconnect` (`759b462`, 4 files, +251/-5)
+## `fix/position-after-disconnect` (`759b462`, 4 files, +274/-5)
 
 Keeps the position across server-initiated stream restarts (adopts the server's position only when it
 resumed inside the song, asks the server to continue at our position when our stream was

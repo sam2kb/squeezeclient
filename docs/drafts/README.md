@@ -14,15 +14,15 @@ upstream. Nothing here is proposed upstream yet.
 
 | branch | commit | subject | diff | PR text |
 | --- | --- | --- | --- | --- |
-| `fix/cometd-request-while-disconnected` | `1c453ab` | CometD: Don't crash when a request is submitted while disconnected | 2 files, +15/-4 | `pr/pr-cometd-crash.md` |
+| `fix/cometd-request-while-disconnected` | `1c453ab` | CometD: Don't crash when a request is submitted while disconnected | 2 files, +14/-4 | `pr/pr-cometd-crash.md` |
 | `fix/local-position-display` | `9fbb028` | Show the position the local player plays instead of the server's estimate | 4 files, +108/-10 | `pr/pr-local-position-display.md` |
 | `fix/mediasession-next-at-playlist-end` | `b10065d` | Media session: Do not offer Next/Previous when there is no next/previous track | 1 file, +13/-6 | `pr/pr-mediasession-next-at-end.md` |
 | `fix/mediasession-pending-track` | `4f3caf6` | Report the expected song for our own track changes | 1 file, +35/-8 | `pr/pr-pending-track-flap.md` |
-| `fix/position-after-disconnect` | `759b462` | Local player: Keep the position across a server-initiated stream restart | 4 files, +251/-5 | `pr/pr-position-after-disconnect.md` |
+| `fix/position-after-disconnect` | `759b462` | Local player: Keep the position across a server-initiated stream restart | 4 files, +274/-5 | `pr/pr-position-after-disconnect.md` |
 | `fix/session-reannounce` | `a6b1af8` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
 | `fix/slider-drag` | `3d4c247` | Now playing: Don't let status updates fight the position slider | 1 file, +95/-5 | `pr/pr-slider-drag.md` |
 | `fix/volume-device-volume-fades` | `ba7f766` | Local player: Keep the device volume across playback state changes | 1 file, +61 | `pr/pr-volume-fades.md` |
-| `feature/nowplaying-favorite-toggle` | `6dc0c91` | Now playing: Add a one tap favorite toggle | 14 files | PR body is on the fork (this branch had one before) |
+| `feature/nowplaying-favorite-toggle` | `6dc0c91` | Now playing: Add a one tap favorite toggle | 14 files, +427/-13 | PR body is on the fork (this branch had one before) |
 
 Two more drafts have no branch of their own:
 
@@ -116,5 +116,6 @@ For every branch it detaches the branch in a scratch worktree under
 `/mnt/d/repos/squeezeclient-drafts/`, runs ktlint on `app/src`, compiles it with the Android
 toolchain and then checks every pair of drafts for merge conflicts. The report is written next to
 this file (`check-report.txt`), per-branch build output to `/tmp/drafts-check/<branch>.log`.
-The checked-out report was generated with the full branch set (obsolete branches included, hence the
-`STALE` entries at the bottom); `check.sh` skips those by default.
+The checked-in `check-report.txt` covers the review set (obsolete branches skipped): all nine
+branches are one commit on top of `6dacef7`, build and lint on their own, and the three conflict
+pairs above are the only merge conflicts between them.

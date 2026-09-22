@@ -54,7 +54,7 @@ in `Slider` when the song changes while the slider is out of its range.
 - whenever `valueTo` is updated, make sure the current value stays inside the new range (the
   update above may be held back).
 
-Diff: one file, +70 / -5 (`ui/nowplaying/NowPlayingFragment.kt`); only *when* positions are
+Diff: one file, +95 / -5 (`ui/nowplaying/NowPlayingFragment.kt`); only *when* positions are
 applied to the slider changes, nothing about how they are fetched or sent.
 Branch: `fix/slider-drag` (`3d4c247`, off `upstream/main` `6dacef7`), pushed to the fork (`origin`),
 not to upstream.
