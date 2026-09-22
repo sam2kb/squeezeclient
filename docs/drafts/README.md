@@ -73,9 +73,10 @@ Its claims were checked against the code and what held up was fixed in the draft
   lower than the last one while nothing plays) is ignored. Reason: LMS repeats the value its fade
   ramp stopped at on every subscription renewal (observed 0.26 while the mixer said 40), which left
   playback quiet/muted depending on the volume mode. The draft now also touches
-  `service/mediasession/SqueezeboxMediaPlayer.kt`, so re-run `check.sh` before proposing it - that
-  file is where `fix/local-position-display` and `fix/mediasession-pending-track` also work, and new
-  conflict pairs are possible (the checked-in report predates this change).
+  `service/mediasession/SqueezeboxMediaPlayer.kt`, where several other drafts also work.
+  `check.sh` has been re-run since (`check-report.txt`): all nine branches build and lint on their
+  own and there are six conflict pairs - the two new ones are with `fix/local-position-display` and
+  `fix/position-after-disconnect`.
 
 Withdrawn, not for upstream: `fix/session-reannounce`. The review showed that media3's
 `addSession`/`removeSession` never release or re-activate the framework session a head unit reads,
@@ -154,11 +155,14 @@ LMS at `http://10.10.2.45:31101/jsonrpc.js`, player id `50:85:82:13:79:5c`, app 
    of untouched code, no AI-flavoured prose).
 4. Does the PR text carry problem, mechanism, evidence (log lines), reproduction and the exact
    change? The maintainer asks for measurable evidence, not adjectives.
-5. Does it conflict with another draft that would land first? Four pairs do, each in one or two
-   hunks: `fix/local-position-display` with `fix/slider-drag`, with `fix/position-after-disconnect`
-   (two files) and with `fix/mediasession-pending-track`, plus `fix/mediasession-pending-track` with
-   `fix/position-after-disconnect` (both touch the Next/Previous handlers). The second PR of each
-   pair needs that rebase, and saying so in the PR text is part of the story.
+5. Does it conflict with another draft that would land first? Six pairs do, each in one or two small
+   hunks, and all but one involve `service/mediasession/SqueezeboxMediaPlayer.kt`:
+   `fix/local-position-display` with `fix/slider-drag` (in the fragment), `fix/position-after-disconnect`
+   (which also touches `LocalPlaybackService.kt`), `fix/mediasession-pending-track` and
+   `fix/volume-device-volume-fades`; plus `fix/mediasession-pending-track` with
+   `fix/position-after-disconnect` and `fix/position-after-disconnect` with
+   `fix/volume-device-volume-fades`. The second PR of each pair needs that rebase, and saying so in
+   the PR text is part of the story.
 6. Does it need a unit test? Upstream tests the extractors under `app/src/test`; local player
    changes usually should come with one (the stream start draft has 8).
 

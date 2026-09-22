@@ -158,6 +158,8 @@ most recent four), and a stream that resumes inside a file is given the stored s
 | `fix/local-position-display` + `fix/position-after-disconnect` | `service/localplayer/LocalPlaybackService.kt`, `service/mediasession/SqueezeboxMediaPlayer.kt` | the position calculation vs the code that replaces parts of it, plus the track-change `note()` calls |
 | `fix/local-position-display` + `fix/mediasession-pending-track` | `service/mediasession/SqueezeboxMediaPlayer.kt` | both add lines in the same place |
 | `fix/mediasession-pending-track` + `fix/position-after-disconnect` | `service/mediasession/SqueezeboxMediaPlayer.kt` | both edit the Next/Previous handlers |
+| `fix/local-position-display` + `fix/volume-device-volume-fades` | `service/mediasession/SqueezeboxMediaPlayer.kt` | the volume draft publishes the mixer volume where that draft edits the state |
+| `fix/position-after-disconnect` + `fix/volume-device-volume-fades` | `service/mediasession/SqueezeboxMediaPlayer.kt` | the seek handlers vs the published volume command list |
 
 Each is one or two small hunks; whichever lands second needs those resolved. Every other pair
 merges cleanly (see `check-report.txt`).

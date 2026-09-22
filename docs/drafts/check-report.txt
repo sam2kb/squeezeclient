@@ -1,4 +1,4 @@
-== draft check 2026-09-22T13:54:29-04:00, upstream 6dacef7 ==
+== draft check 2026-09-22T19:04:03-04:00, upstream 6dacef7 ==
    gradle: cmd.exe /c "cd /d D:\repos\squeezeclient-drafts\scratch && gradlew.bat --quiet :app:compileFossDebugKotlin"
 --- feature/nowplaying-favorite-toggle
     base: 0 behind / 1 ahead of upstream; diff: +437/-13 files=14
@@ -33,7 +33,7 @@
     ktlint: clean
     compile: OK
 --- fix/volume-device-volume-fades
-    base: 0 behind / 1 ahead of upstream; diff: +61/-0 files=1
+    base: 0 behind / 1 ahead of upstream; diff: +139/-0 files=3
     ktlint: clean
     compile: OK
 
@@ -41,6 +41,8 @@
     fix/local-position-display + fix/mediasession-pending-track -> CONFLICT in app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt  Auto-merging app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt CONFLICT (content): Merge conflict in app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt 
     fix/local-position-display + fix/position-after-disconnect -> CONFLICT in app/src/main/java/de/maniac103/squeezeclient/service/localplayer/LocalPlaybackService.kt app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt  Auto-merging app/src/main/java/de/maniac103/squeezeclient/service/localplayer/LocalPlaybackService.kt 
     fix/local-position-display + fix/slider-drag -> CONFLICT in app/src/main/java/de/maniac103/squeezeclient/ui/nowplaying/NowPlayingFragment.kt  Auto-merging app/src/main/java/de/maniac103/squeezeclient/ui/nowplaying/NowPlayingFragment.kt CONFLICT (content): Merge conflict in app/src/main/java/de/maniac103/squeezeclient/ui/nowplaying/NowPlayingFragment.kt 
+    fix/local-position-display + fix/volume-device-volume-fades -> CONFLICT in app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt  Auto-merging app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt CONFLICT (content): Merge conflict in app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt 
     fix/mediasession-pending-track + fix/position-after-disconnect -> CONFLICT in app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt  Auto-merging app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt CONFLICT (content): Merge conflict in app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt 
+    fix/position-after-disconnect + fix/volume-device-volume-fades -> CONFLICT in app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt  Auto-merging app/src/main/java/de/maniac103/squeezeclient/service/localplayer/LocalPlayer.kt Auto-merging app/src/main/java/de/maniac103/squeezeclient/service/mediasession/SqueezeboxMediaPlayer.kt 
 
 == all branches build on their own ==
