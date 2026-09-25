@@ -46,7 +46,7 @@ listed as obsolete below.
 An independent review of every draft lives in `reviews/` (written on `review/draft-prs`, `a3c654e`).
 Its claims were checked against the code and what held up was fixed in the drafts:
 
-- `fix/cometd-request-while-disconnected` `e256ce6` - the paging catch is limited to the two
+- `fix/cometd-request-while-disconnected` `feb4a80` - the paging catch is limited to the two
   exceptions this request path produces and rethrows cancellation (the old `catch (e: Exception)`
   turned bugs into an empty list and swallowed Paging's cancellation); the subscription flow's
   initial-request catch now really does catch every failure, as its comment claims. A device report
