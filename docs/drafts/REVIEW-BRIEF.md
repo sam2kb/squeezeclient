@@ -10,7 +10,7 @@ not as separate commits), which is what the test phone has been running, so thei
 combination* is what was used most of the time. The branch is not a PR; it is the review and test
 ground.
 
-## `fix/cometd-request-while-disconnected` (`e256ce6`, 3 files, +34/-4)
+## `fix/cometd-request-while-disconnected` (`feb4a80`, 3 files, +60/-23)
 
 `ConnectionHelper.publishOneShotRequest` now throws `CometdClient.CometdException` instead of a bare
 `IllegalStateException` when the client id is not there yet, and the paging load path catches it.
@@ -23,6 +23,15 @@ ground.
   that cannot be sent no longer changes what the session reports. Verified on the device against a
   log in which the connection retried every 10 s (`conn: disconnected, wasConnected=false`) while
   the keys arrived: no walk, no crash.
+- Same report, second half: every command nobody waits for goes through `publishCommand` now, so a
+  dead connection drops it instead of failing the caller. That matters for the UI, which starts its
+  commands from `lifecycleScope`: `publishOneShotRequest` *throws* when the client or its scope is
+  gone, and those callers have no handler. Verified on the device with Wi-Fi and data off: pause and
+  play through the media session while `conn: disconnected` spammed the log - the process stayed
+  alive (`pidof` unchanged, crash buffer empty).
+- Suspicious: the change is broad for a small PR (13 call sites). A reviewer may ask why the
+  favourites are not included - because the UI rolls the icon back from their failure, so they keep
+  it.
 - Suspicious: the early return covers the whole `handleSeek`, so scrub and seek-to-item are dropped
   while disconnected as well. That is the honest behaviour, but it means a seek cannot be queued for
   the moment the connection comes back. Whether the exception type is the right contract for the
@@ -57,16 +66,37 @@ fixes `IllegalArgumentException: currentMediaItemIndex must be less than playlis
 - Suspicious: nothing much, but check that hiding the commands does not confuse controllers that
   expect them.
 
-## `fix/mediasession-pending-track` (`4f3caf6`, 1 file, +35/-8)
+## `fix/mediasession-pending-track` (`a8cc4fd`, 1 file, +44/-10)
 
-Carries the expected song inside the pending state, so `getState()` does not report the previous song
-for ~1.3 s after a track change (the "new -> old -> new" flap on head units).
+Carries the expected state inside the pending state, so `getState()` does not report the previous song
+for ~1.3 s after a track change (the "new -> old -> new" flap on head units), and reports the play
+state a press asked for instead of the server's until the server confirms it.
 
 - Verified: headless - after a media Next the only published song is the new one; the old one is
   never republished.
+- Added later (device report 2026-09-25: "noticeable play/pause button flap"): the pending state now
+  carries the play state as well. Verified on the device - a pause through the media session
+  published `playWhenReady=false` 8 ms after the press and kept it (the server confirmed 0.6 s
+  later); a play press published `playWhenReady=true` after 6 ms. Before the change, the published
+  state stayed at the server's value for the whole round trip and a status in flight flipped it back.
 - Suspicious: it is a workaround inside the maintainer's own rework of an earlier PR; the pending
-  state should ideally be cleared reliably (it waits for the server to confirm the song). Conflicts
-  with `fix/local-position-display` in `SqueezeboxMediaPlayer.kt` (one hunk).
+  state should ideally be cleared reliably (it now waits for the song *and* the play state). It
+  conflicts with `fix/local-position-display` and `fix/position-after-disconnect` in
+  `SqueezeboxMediaPlayer.kt` (one hunk each).
+
+## `fix/nowplaying-play-pause-response` (`c1e2bfc`, 1 file, +59/-7)
+
+Shows the play state a play/pause press asked for on the button until the server reports it, and does
+not send the press at all while the connection is down (a toast says so).
+
+- Why: the button rendered `status.playbackState`, i.e. the server's state, so it only changed after
+  the round trip - measured 0.6 s against a local server. A press that shows nothing looks ignored
+  and is repeated; the log of the flaky session shows pause arriving three to six times per press.
+- Verified: builds and lints on its own (`check-report.txt`); the mechanics are the same as the media
+  session fix above, whose timing was measured in the device log.
+- Suspicious: it duplicates the pending-state idea in the UI (the session has its own), and it
+  conflicts with `fix/local-position-display` and `fix/slider-drag`, which also touch the fragment.
+  It is the newest draft and has had the least device time.
 
 ## `fix/position-after-disconnect` (`759b462`, 4 files, +274/-5)
 

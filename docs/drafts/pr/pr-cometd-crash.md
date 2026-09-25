@@ -50,7 +50,7 @@ request path used before - so the new exception type escaped it and the process 
 same problem with a different caller, so it is fixed in the same change: a page load reports any
 failure as a load error, so the list can show it and retry.
 
-Diff: 3 files, +34 / -4 (`cometd/ConnectionHelper.kt`, `ui/common/BasePagingListFragment.kt`,
+Diff: 3 files, +60 / -23 (`cometd/ConnectionHelper.kt`, `ui/common/BasePagingListFragment.kt`,
 `service/mediasession/SqueezeboxMediaPlayer.kt`).
 
 **Third manifestation** (device report, no car): with the server unreachable, media key presses kept
@@ -63,10 +63,20 @@ app. A button press is best-effort now (the failure is logged, not thrown) and a
 returns early while the connection is down, so the session keeps reporting the song that is really
 playing.
 
-Branch: `fix/cometd-request-while-disconnected` (`e256ce6`, off `upstream/main` `6dacef7`), pushed
+**Fourth manifestation** (found while fixing the same report): the failure also kills callers that
+are not a stream. `publishOneShotRequest` reports "not connected" by *throwing* when the client or
+its scope is gone, and the UI starts its commands - play/pause, seek, playlist edits - from the
+lifecycle scope without a handler, so the process died there instead of dropping the command. All
+commands nobody waits for now go through one `publishCommand` helper that logs and drops them;
+requests whose result is used (favourites, playlist fetches) keep the failure.
+
+Branch: `fix/cometd-request-while-disconnected` (`feb4a80`, off `upstream/main` `6dacef7`), pushed
 to the fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`e256ce6`) on top of upstream `6dacef7`; it builds and lints on its own (see
-`docs/drafts/check-report.txt`). It does not conflict with any other draft.
+One commit (`feb4a80`) on top of upstream `6dacef7`; it builds and lints on its own (see
+`docs/drafts/check-report.txt`). With the command helper it now works in the same
+`cometd/ConnectionHelper.kt` regions as `feature/nowplaying-favorite-toggle` and
+`fix/position-after-disconnect`, so it conflicts with both in small hunks. The favourites
+intentionally keep their failure: the UI rolls the icon back from it.

@@ -18,10 +18,11 @@ upstream. Nothing here is proposed upstream yet.
 
 | branch | commit | subject | diff | PR text |
 | --- | --- | --- | --- | --- |
-| `fix/cometd-request-while-disconnected` | `e256ce6` | CometD: Don't crash when a request is submitted while disconnected | 3 files, +34/-4 | `pr/pr-cometd-crash.md` |
+| `fix/cometd-request-while-disconnected` | `feb4a80` | CometD: Don't crash when a request is submitted while disconnected | 3 files, +60/-23 | `pr/pr-cometd-crash.md` |
 | `fix/local-position-display` | `3bd12fa` | Show the position the local player plays instead of the server's estimate | 5 files, +113/-10 | `pr/pr-local-position-display.md` |
 | `fix/mediasession-next-at-playlist-end` | `8317f8c` | Media session: Keep the reported playlist index inside the list | 1 file, +20/-7 | `pr/pr-mediasession-next-at-end.md` |
-| `fix/mediasession-pending-track` | `4f3caf6` | Report the expected song for our own track changes | 1 file, +35/-8 | `pr/pr-pending-track-flap.md` |
+| `fix/mediasession-pending-track` | `a8cc4fd` | Report the state we asked for until the server confirms it | 1 file, +44/-10 | `pr/pr-pending-track-flap.md` |
+| `fix/nowplaying-play-pause-response` | `c1e2bfc` | Now playing: Show the play state a press asked for right away | 1 file, +59/-7 | `pr/pr-nowplaying-play-pause.md` |
 | `fix/position-after-disconnect` | `cab626b` | Local player: Keep the position across a server-initiated stream restart | 5 files, +275/-5 | `pr/pr-position-after-disconnect.md` |
 | `fix/session-reannounce` | `a6b1af8` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
 | `fix/slider-drag` | `3d4c247` | Now playing: Don't let status updates fight the position slider | 1 file, +95/-5 | `pr/pr-slider-drag.md` |
@@ -50,14 +51,26 @@ Its claims were checked against the code and what held up was fixed in the draft
   turned bugs into an empty list and swallowed Paging's cancellation); the subscription flow's
   initial-request catch now really does catch every failure, as its comment claims. A device report
   (media keys pressed while the server was unreachable) added the second half of the draft: button
-  presses are best-effort, and a seek that cannot reach the server is dropped instead of walking the
-  media session through the playlist titles with nothing playing.
+  presses are best-effort, a seek that cannot reach the server is dropped instead of walking the
+  media session through the playlist titles with nothing playing, and every command nobody waits for
+  (play/pause/stop, volume, mute, position, playlist edits) is dropped instead of failing its caller
+  - with the client gone, the caller's coroutine - the UI starts them from the lifecycle scope - used
+  to die with it.
 - `fix/local-position-display` `3bd12fa` - a device report ("the next track kept counting on from
   the previous song's position after a resume") added the missing piece: the built-in player
   switches media items before the server reports the new song, so the bookkeeping is reset on the
   media item transition (`LocalPlayer.onMediaItemTransition`) instead of waiting for the media
-  session.
-- `fix/mediasession-next-at-playlist-end` `8317f8c` - an empty playlist window no longer falls into
+  session.- `fix/mediasession-pending-track` `a8cc4fd` - the play/pause button flap of the same kind: the
+  session reported the server's play state, so a press only showed up after the round trip, and a
+  status still in flight flipped the button back. The pending state carries the play state as well
+  now and is only dropped once the server confirms it. Verified on the device: pause published
+  `playWhenReady=false` 8 ms after the press and kept it, the server confirming 0.6 s later; play
+  likewise after 6 ms.
+- `fix/nowplaying-play-pause-response` `c1e2bfc` - the now playing screen had the same latency on
+  the surface the user watches (0.6 s measured, long enough that a press looks ignored and is
+  repeated - the logs of a flaky session show pause arriving three to six times per press). The
+  button now shows the state a press asked for until the server reports it, and a press is not sent
+  at all while the connection is down (a toast says so). This is a new draft from 2026-09-25.- `fix/mediasession-next-at-playlist-end` `8317f8c` - an empty playlist window no longer falls into
   the clamp (`coerceIn(n, n-1)` throws; now `takeIf { it.items.isNotEmpty() }`), and the skip
   commands are advertised against the server's track count instead of the published window, so a
   truncated playlist does not hide Next.
@@ -82,9 +95,8 @@ Its claims were checked against the code and what held up was fixed in the draft
   ramp stopped at on every subscription renewal (observed 0.26 while the mixer said 40), which left
   playback quiet/muted depending on the volume mode. The draft now also touches
   `service/mediasession/SqueezeboxMediaPlayer.kt`, where several other drafts also work.
-  `check.sh` has been re-run since (`check-report.txt`): all nine branches build and lint on their
-  own and there are six conflict pairs - the two new ones are with `fix/local-position-display` and
-  `fix/position-after-disconnect`.
+  `check.sh` has been re-run since (`check-report.txt`): all ten branches build and lint on their
+  own, and there are ten conflict pairs (see the checklist below).
 
 Withdrawn, not for upstream: `fix/session-reannounce`. The review showed that media3's
 `addSession`/`removeSession` never release or re-activate the framework session a head unit reads,
@@ -163,14 +175,17 @@ LMS at `http://10.10.2.45:31101/jsonrpc.js`, player id `50:85:82:13:79:5c`, app 
    of untouched code, no AI-flavoured prose).
 4. Does the PR text carry problem, mechanism, evidence (log lines), reproduction and the exact
    change? The maintainer asks for measurable evidence, not adjectives.
-5. Does it conflict with another draft that would land first? Six pairs do, each in one or two small
-   hunks, and all but one involve `service/mediasession/SqueezeboxMediaPlayer.kt`:
-   `fix/local-position-display` with `fix/slider-drag` (in the fragment), `fix/position-after-disconnect`
-   (which also touches `LocalPlaybackService.kt`), `fix/mediasession-pending-track` and
-   `fix/volume-device-volume-fades`; plus `fix/mediasession-pending-track` with
-   `fix/position-after-disconnect` and `fix/position-after-disconnect` with
-   `fix/volume-device-volume-fades`. The second PR of each pair needs that rebase, and saying so in
-   the PR text is part of the story.
+5. Does it conflict with another draft that would land first? Ten pairs do, each in one or two small
+   hunks; most involve `service/mediasession/SqueezeboxMediaPlayer.kt`, the rest
+   `ui/nowplaying/NowPlayingFragment.kt` and `cometd/ConnectionHelper.kt`:
+   `fix/local-position-display` with `fix/slider-drag`, `fix/mediasession-pending-track`,
+   `fix/position-after-disconnect` (which also touches `LocalPlaybackService.kt`),
+   `fix/volume-device-volume-fades` and `fix/nowplaying-play-pause-response`; `fix/slider-drag` and
+   `fix/nowplaying-play-pause-response`; `fix/mediasession-pending-track` with
+   `fix/position-after-disconnect`; `fix/position-after-disconnect` with
+   `fix/volume-device-volume-fades`; and `fix/cometd-request-while-disconnected` with
+   `feature/nowplaying-favorite-toggle` and with `fix/position-after-disconnect`. The second PR of
+   each pair needs that rebase, and saying so in the PR text is part of the story.
 6. Does it need a unit test? Upstream tests the extractors under `app/src/test`; local player
    changes usually should come with one (the stream start draft has 8).
 

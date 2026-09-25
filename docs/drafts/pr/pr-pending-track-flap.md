@@ -53,12 +53,22 @@ The index is correct immediately; only the song lags, for about 1.3 s in this ru
 - in `applyPlayerState()`, only drop the pending state once the applied state shows that song; the
   existing 3 s revert job still bounds it.
 
-Diff: one file, +35 / -8, nothing outside the reported metadata is touched.
-Branch: `fix/mediasession-pending-track` (`4f3caf6`, off `upstream/main` `6dacef7`), pushed to the
+**The same for the play state** (device report, 2026-09-25): "noticeable play/pause button flap". A
+play/pause press was equally invisible until the server answered - the session published
+`playerState.playbackState`, i.e. the server's value - and a status that was still in flight flipped
+the button back. The pending state now carries the expected play state as well, `getState()` reports
+it, and `applyPlayerState()` only drops the pending state once the applied status shows *both* the
+song and the play state. Measured on the device: a pause published `playWhenReady=false` 8 ms after
+the press and kept it, with the server confirming 0.6 s later; a play press published
+`playWhenReady=true` after 6 ms.
+
+Diff: one file, +44 / -10, nothing outside the reported state is touched.
+Branch: `fix/mediasession-pending-track` (`a8cc4fd`, off `upstream/main` `6dacef7`), pushed to the
 fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`4f3caf6`) on top of upstream `6dacef7`; it builds and lints on its own (see
-`docs/drafts/check-report.txt`). It conflicts with `fix/local-position-display` in
-`service/mediasession/SqueezeboxMediaPlayer.kt` (one small hunk, both add lines in the same place).
+One commit (`a8cc4fd`) on top of upstream `6dacef7`; it builds and lints on its own (see
+`docs/drafts/check-report.txt`). It conflicts with `fix/local-position-display` and
+`fix/position-after-disconnect` in `service/mediasession/SqueezeboxMediaPlayer.kt` (one small hunk
+each, all three add lines in the same place).
