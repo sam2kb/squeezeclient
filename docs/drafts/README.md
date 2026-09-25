@@ -18,8 +18,8 @@ upstream. Nothing here is proposed upstream yet.
 
 | branch | commit | subject | diff | PR text |
 | --- | --- | --- | --- | --- |
-| `fix/cometd-request-while-disconnected` | `9df2bbc` | CometD: Don't crash when a request is submitted while disconnected | 2 files, +22/-3 | `pr/pr-cometd-crash.md` |
-| `fix/local-position-display` | `9fbb028` | Show the position the local player plays instead of the server's estimate | 4 files, +108/-10 | `pr/pr-local-position-display.md` |
+| `fix/cometd-request-while-disconnected` | `e256ce6` | CometD: Don't crash when a request is submitted while disconnected | 3 files, +34/-4 | `pr/pr-cometd-crash.md` |
+| `fix/local-position-display` | `3bd12fa` | Show the position the local player plays instead of the server's estimate | 5 files, +113/-10 | `pr/pr-local-position-display.md` |
 | `fix/mediasession-next-at-playlist-end` | `8317f8c` | Media session: Keep the reported playlist index inside the list | 1 file, +20/-7 | `pr/pr-mediasession-next-at-end.md` |
 | `fix/mediasession-pending-track` | `4f3caf6` | Report the expected song for our own track changes | 1 file, +35/-8 | `pr/pr-pending-track-flap.md` |
 | `fix/position-after-disconnect` | `cab626b` | Local player: Keep the position across a server-initiated stream restart | 5 files, +275/-5 | `pr/pr-position-after-disconnect.md` |
@@ -40,15 +40,23 @@ commit after this session started - everything else in the table above was alrea
 on `6dacef7`. Conflict-free rebases were possible for nine of the older branches; the rest are
 listed as obsolete below.
 
-## Review outcome (2026-09-22)
+## Review outcome (2026-09-22, device follow-ups 2026-09-25)
 
 An independent review of every draft lives in `reviews/` (written on `review/draft-prs`, `a3c654e`).
 Its claims were checked against the code and what held up was fixed in the drafts:
 
-- `fix/cometd-request-while-disconnected` `9df2bbc` - the paging catch is limited to the two
+- `fix/cometd-request-while-disconnected` `e256ce6` - the paging catch is limited to the two
   exceptions this request path produces and rethrows cancellation (the old `catch (e: Exception)`
   turned bugs into an empty list and swallowed Paging's cancellation); the subscription flow's
-  initial-request catch now really does catch every failure, as its comment claims.
+  initial-request catch now really does catch every failure, as its comment claims. A device report
+  (media keys pressed while the server was unreachable) added the second half of the draft: button
+  presses are best-effort, and a seek that cannot reach the server is dropped instead of walking the
+  media session through the playlist titles with nothing playing.
+- `fix/local-position-display` `3bd12fa` - a device report ("the next track kept counting on from
+  the previous song's position after a resume") added the missing piece: the built-in player
+  switches media items before the server reports the new song, so the bookkeeping is reset on the
+  media item transition (`LocalPlayer.onMediaItemTransition`) instead of waiting for the media
+  session.
 - `fix/mediasession-next-at-playlist-end` `8317f8c` - an empty playlist window no longer falls into
   the clamp (`coerceIn(n, n-1)` throws; now `takeIf { it.items.isNotEmpty() }`), and the skip
   commands are advertised against the server's track count instead of the published window, so a
@@ -127,8 +135,8 @@ was verified for each draft (and how, so it can be repeated) plus what to be sus
 ## Device recipe (author's setup, for repeating a verification)
 
 ```bash
-adb -P 5038 -s RFCX91M4DAK install -r app/build/outputs/apk/foss/debug/app-foss-debug.apk
-adb -P 5038 -s RFCX91M4DAK shell am start -n de.maniac103.squeezeclient.debug/de.maniac103.squeezeclient.ui.MainActivity
+adb -P 5039 -s RFCX91M4DAK install -r app/build/outputs/apk/foss/debug/app-foss-debug.apk
+adb -P 5039 -s RFCX91M4DAK shell am start -n de.maniac103.squeezeclient.debug/de.maniac103.squeezeclient.ui.MainActivity
 ```
 
 LMS at `http://10.10.2.45:31101/jsonrpc.js`, player id `50:85:82:13:79:5c`, app log at

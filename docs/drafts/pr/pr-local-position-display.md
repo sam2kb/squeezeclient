@@ -63,17 +63,19 @@ when it plays gaplessly, and it does so when it considers the current song finis
 command marks that boundary, so the position kept counting into the new song (measured: the slider
 counted 4m5s -> 4m19s while the new song was playing from its beginning). The media session reports
 the song change, so the player can start counting from the new song's beginning (measured from the
-stream position at that moment).
+stream position at that moment). The built-in player itself switches media items before the server
+reports the new song, so `LocalPlayer.onMediaItemTransition` resets the bookkeeping for automatic
+transitions directly; the media-session report stays the fallback for transitions it does not see.
 
-Diff: 4 files, +108 / -10 (`service/localplayer/LocalPlayerPosition.kt` (new),
-`service/localplayer/LocalPlaybackService.kt`, `service/mediasession/SqueezeboxMediaPlayer.kt`,
-`ui/nowplaying/NowPlayingFragment.kt`).
-Branch: `fix/local-position-display` (`9fbb028`, off `upstream/main` `6dacef7`), pushed to the fork
+Diff: 5 files, +113 / -10 (`service/localplayer/LocalPlayerPosition.kt` (new),
+`service/localplayer/LocalPlaybackService.kt`, `service/localplayer/LocalPlayer.kt`,
+`service/mediasession/SqueezeboxMediaPlayer.kt`, `ui/nowplaying/NowPlayingFragment.kt`).
+Branch: `fix/local-position-display` (`3bd12fa`, off `upstream/main` `6dacef7`), pushed to the fork
 (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`9fbb028`) on top of upstream `6dacef7`; it builds and lints on its own (see
+One commit (`3bd12fa`) on top of upstream `6dacef7`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`).
 
 This is the oldest of the four drafts that touch position handling, and the four that were written

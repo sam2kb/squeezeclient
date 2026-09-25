@@ -153,29 +153,28 @@ class SqueezeboxMediaPlayer(
     override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int) = future {
         Diag.log("cmd", "seek cmd=$seekCommand index=$mediaItemIndex posMs=$positionMs")
         val playerId = currentPlayer ?: return@future
+        // A seek cannot succeed while the connection is down; bail out instead of making
+        // the media session walk through the playlist on its own.
+        if (!isConnected()) return@future
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_NEXT -> {
-                if (isConnected()) {
-                    PositionChangeRequests.note()
-                    updateUnacknowledgedState(
-                        playlistPositionOffset = 1,
-                        song = songAtOffset(1)
-                    )
-                    connectionHelper.sendButtonRequest(PlaybackButtonRequest.NextTrack(playerId))
-                }
+                PositionChangeRequests.note()
+                updateUnacknowledgedState(
+                    playlistPositionOffset = 1,
+                    song = songAtOffset(1)
+                )
+                connectionHelper.sendButtonRequest(PlaybackButtonRequest.NextTrack(playerId))
             }
 
             COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS -> {
-                if (isConnected()) {
-                    PositionChangeRequests.note()
-                    updateUnacknowledgedState(
-                        playlistPositionOffset = -1,
-                        song = songAtOffset(-1)
-                    )
-                    connectionHelper.sendButtonRequest(
-                        PlaybackButtonRequest.PreviousTrack(playerId)
-                    )
-                }
+                PositionChangeRequests.note()
+                updateUnacknowledgedState(
+                    playlistPositionOffset = -1,
+                    song = songAtOffset(-1)
+                )
+                connectionHelper.sendButtonRequest(
+                    PlaybackButtonRequest.PreviousTrack(playerId)
+                )
             }
 
             COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> {

@@ -50,11 +50,23 @@ request path used before - so the new exception type escaped it and the process 
 same problem with a different caller, so it is fixed in the same change: a page load reports any
 failure as a load error, so the list can show it and retry.
 
-Diff: 2 files, +22 / -3 (`cometd/ConnectionHelper.kt`, `ui/common/BasePagingListFragment.kt`).
-Branch: `fix/cometd-request-while-disconnected` (`1c453ab`, off `upstream/main` `6dacef7`), pushed
+Diff: 3 files, +34 / -4 (`cometd/ConnectionHelper.kt`, `ui/common/BasePagingListFragment.kt`,
+`service/mediasession/SqueezeboxMediaPlayer.kt`).
+
+**Third manifestation** (device report, no car): with the server unreachable, media key presses kept
+walking the media session through the playlist - the notification showed title after title while
+nothing played, and those presses were the only thing that "did" anything. The log shows the
+connection retrying every 10 s (`conn: disconnected, wasConnected=false`) while the keys arrived.
+Two things were wrong: a button request that cannot be sent was still fatal to its caller, and the
+seek handler published the optimistic track change before the request had a chance to leave the
+app. A button press is best-effort now (the failure is logged, not thrown) and a seek command
+returns early while the connection is down, so the session keeps reporting the song that is really
+playing.
+
+Branch: `fix/cometd-request-while-disconnected` (`e256ce6`, off `upstream/main` `6dacef7`), pushed
 to the fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`1c453ab`) on top of upstream `6dacef7`; it builds and lints on its own (see
+One commit (`e256ce6`) on top of upstream `6dacef7`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). It does not conflict with any other draft.

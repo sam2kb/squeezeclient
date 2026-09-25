@@ -10,17 +10,26 @@ not as separate commits), which is what the test phone has been running, so thei
 combination* is what was used most of the time. The branch is not a PR; it is the review and test
 ground.
 
-## `fix/cometd-request-while-disconnected` (`1c453ab`, 2 files, +15/-4)
+## `fix/cometd-request-while-disconnected` (`e256ce6`, 3 files, +34/-4)
 
 `ConnectionHelper.publishOneShotRequest` now throws `CometdClient.CometdException` instead of a bare
 `IllegalStateException` when the client id is not there yet, and the paging load path catches it.
 
 - Verified: live - three Wi-Fi blips plus opening the app during the re-handshake no longer produce a
   FATAL (`IllegalStateException` escaped into `BasePagingListFragment.ItemSource.load` before).
-- Suspicious: whether the exception type is the right contract for the other callers; the change is
-  small, but the paging fragment swallows *all* exceptions now.
+- Added later (device report 2026-09-25): with the server unreachable, a Next/Previous press made the
+  media session walk through the playlist titles while nothing played. Button presses are
+  best-effort now and `handleSeek` returns early while the CometD connection is down, so a request
+  that cannot be sent no longer changes what the session reports. Verified on the device against a
+  log in which the connection retried every 10 s (`conn: disconnected, wasConnected=false`) while
+  the keys arrived: no walk, no crash.
+- Suspicious: the early return covers the whole `handleSeek`, so scrub and seek-to-item are dropped
+  while disconnected as well. That is the honest behaviour, but it means a seek cannot be queued for
+  the moment the connection comes back. Whether the exception type is the right contract for the
+  other callers is still open; the change is small, but the paging fragment swallows *all*
+  exceptions now.
 
-## `fix/local-position-display` (`9fbb028`, 4 files, +108/-10)
+## `fix/local-position-display` (`3bd12fa`, 5 files, +113/-10)
 
 Adds `LocalPlayerPosition` (process-wide StateFlow per player) and has the now playing screen and the
 media session show the local player's own position instead of the server's, resetting it when the
@@ -29,6 +38,11 @@ song changes.
 - Verified: blip tests - display and local position stay within 1-2 s of each other across a
   connection loss, where the server's value jumped +20-35 s. Song-change reset verified via
   `songGeneration`.
+- Added later (device report 2026-09-25): after a resume, the following track kept counting on from
+  the previous song's position. The built-in player switches items before the server reports the
+  new song, so `LocalPlayer.onMediaItemTransition` resets the position for automatic transitions
+  itself; the media-session path stays the fallback for transitions it does not see. Verified on
+  the device: the slider of a track that started after a resume begins at 0.
 - Suspicious: it conflicts with three other drafts (see below); its value depends on the local player
   being the active one (the server's position is right for every other player). It is the oldest of
   the four position drafts, so the other three are the ones that would need a one-hunk rebase.
