@@ -276,13 +276,16 @@ class SqueezeboxMediaPlayer(
             }
         }
 
-        val playWhenReady = playerState.playbackState == PlayerStatus.PlayState.Playing
+        // Report the state we are acting on rather than the server's: a press takes effect
+        // immediately, and a status that is still in flight must not flip the button back.
+        val reportedPlayState = unacknowledgedChange?.playState ?: playerState.playbackState
+        val playWhenReady = reportedPlayState == PlayerStatus.PlayState.Playing
         val playbackState = when {
             !isConnectedToServer -> STATE_BUFFERING
 
             !playerState.powered -> STATE_IDLE
 
-            else -> when (unacknowledgedChange?.playState ?: playerState.playbackState) {
+            else -> when (reportedPlayState) {
                 PlayerStatus.PlayState.Playing -> STATE_READY
                 PlayerStatus.PlayState.Paused -> STATE_READY
                 PlayerStatus.PlayState.Stopped -> STATE_IDLE
@@ -518,11 +521,15 @@ class SqueezeboxMediaPlayer(
                 "state=${newPlayerState.playbackState} " +
                 "playlistRev=${Diag.rev(newPlayerState.playlist?.timestamp)}"
         )
-        val pendingSong = unacknowledgedStateChange?.song
+        val pending = unacknowledgedStateChange
         playerState = newPlayerState
-        // Keep reporting the pending song until the server's state shows it; statuses for the
-        // still-current previous revision arrive in between and would flip the metadata back.
-        if (pendingSong == null || newPlayerState.currentSong == pendingSong) {
+        // Keep reporting what we asked for until the server's state shows it; statuses for the
+        // still-current previous revision arrive in between and would flip the metadata and the
+        // play state back to the old values.
+        val songConfirmed = pending?.song == null || newPlayerState.currentSong == pending.song
+        val playStateConfirmed =
+            pending?.playState == null || newPlayerState.playbackState == pending.playState
+        if (pending == null || (songConfirmed && playStateConfirmed)) {
             unacknowledgedStateChange = null
             unacknowledgedStateRevertJob?.cancel()
         }

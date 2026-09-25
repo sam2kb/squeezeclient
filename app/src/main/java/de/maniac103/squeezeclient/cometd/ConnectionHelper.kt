@@ -268,24 +268,23 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
         ).asModelPlaylist(json, page.start.toInt())
 
     suspend fun movePlaylistItem(playerId: PlayerId, fromPosition: Int, toPosition: Int) =
-        publishOneShotRequest(MovePlaylistItemRequest(playerId, fromPosition, toPosition))
+        publishCommand(MovePlaylistItemRequest(playerId, fromPosition, toPosition))
 
     suspend fun removePlaylistItem(playerId: PlayerId, position: Int) =
-        publishOneShotRequest(RemovePlaylistItemRequest(playerId, position))
+        publishCommand(RemovePlaylistItemRequest(playerId, position))
 
-    suspend fun advanceToPlaylistPosition(playerId: PlayerId, position: Int) =
-        publishOneShotRequest(
-            SetPlaylistPositionRequest(playerId, position, appContext.prefs.fadeInDuration)
-        )
+    suspend fun advanceToPlaylistPosition(playerId: PlayerId, position: Int) = publishCommand(
+        SetPlaylistPositionRequest(playerId, position, appContext.prefs.fadeInDuration)
+    )
 
     suspend fun clearCurrentPlaylist(playerId: PlayerId) =
-        publishOneShotRequest(ClearPlaylistRequest(playerId))
+        publishCommand(ClearPlaylistRequest(playerId))
 
     suspend fun saveCurrentPlaylist(playerId: PlayerId, name: String) =
-        publishOneShotRequest(SavePlaylistRequest(playerId, name))
+        publishCommand(SavePlaylistRequest(playerId, name))
 
     suspend fun executeAction(playerId: PlayerId, action: JiveAction) =
-        publishOneShotRequest(ExecuteActionRequest(playerId, action))
+        publishCommand(ExecuteActionRequest(playerId, action))
 
     suspend fun changePlaybackState(playerId: PlayerId, state: PlayerStatus.PlayState) {
         val currentState = playerStates[playerId]
@@ -308,19 +307,18 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
                 ChangePlaybackStateRequest.Play(playerId, appContext.prefs.fadeInDuration)
             }
         } ?: return
-        publishOneShotRequest(request)
+        publishCommand(request)
     }
 
     suspend fun syncPlayers(masterPlayerId: PlayerId, slavePlayerId: PlayerId) =
-        publishOneShotRequest(SyncPlayersRequest(masterPlayerId, slavePlayerId))
-    suspend fun unsyncPlayer(playerId: PlayerId) =
-        publishOneShotRequest(UnsyncPlayerRequest(playerId))
+        publishCommand(SyncPlayersRequest(masterPlayerId, slavePlayerId))
+    suspend fun unsyncPlayer(playerId: PlayerId) = publishCommand(UnsyncPlayerRequest(playerId))
 
     suspend fun setMuteState(playerId: PlayerId, muted: Boolean) =
-        publishOneShotRequest(SetMuteStateRequest(playerId, muted))
+        publishCommand(SetMuteStateRequest(playerId, muted))
 
     suspend fun setVolume(playerId: PlayerId, volume: Int) =
-        publishOneShotRequest(SetVolumeRequest(playerId, volume))
+        publishCommand(SetVolumeRequest(playerId, volume))
 
     suspend fun getCurrentTrackInfo(playerId: PlayerId) =
         doRequestWithResult<CurrentTrackInfoResponse>(CurrentTrackInfoRequest(playerId)).current
@@ -334,20 +332,14 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
     suspend fun removeFavorite(playerId: PlayerId, url: String, title: String) =
         publishOneShotRequest(FavoritesDeleteRequest(playerId, url, title))
 
-    suspend fun togglePower(playerId: PlayerId) =
-        publishOneShotRequest(PlayerPowerRequest(playerId, null))
+    suspend fun togglePower(playerId: PlayerId) = publishCommand(PlayerPowerRequest(playerId, null))
     suspend fun setPowerState(playerId: PlayerId, on: Boolean) =
-        publishOneShotRequest(PlayerPowerRequest(playerId, on))
-    suspend fun sendButtonRequest(request: PlaybackButtonRequest) {
-        // A button press must not kill the app when the server is unreachable; the press
-        // simply has no effect in that case.
-        runCatching { publishOneShotRequest(request) }
-            .onFailure { Log.d(TAG, "Could not send the button request", it) }
-    }
+        publishCommand(PlayerPowerRequest(playerId, on))
+    suspend fun sendButtonRequest(request: PlaybackButtonRequest) = publishCommand(request)
 
     suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) {
         PositionChangeRequests.note(positionSeconds)
-        publishOneShotRequest(SetPlaybackPositionRequest(playerId, positionSeconds))
+        publishCommand(SetPlaybackPositionRequest(playerId, positionSeconds))
     }
 
     /**
@@ -407,6 +399,21 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
     private suspend inline fun <reified T> doRequestWithResult(request: Request): T {
         val jsonData = publishOneShotRequest(request)
         return json.decodeFromJsonElement<T>(jsonData)
+    }
+
+    /**
+     * Sends a command nobody waits for. If it cannot be delivered - the server is unreachable or
+     * the connection is being re-established - it is dropped: the server cannot act on it anyway,
+     * and a command must never take its caller down with it.
+     */
+    private suspend fun publishCommand(request: Request) {
+        try {
+            publishOneShotRequest(request)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d(TAG, "Could not send $request", e)
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

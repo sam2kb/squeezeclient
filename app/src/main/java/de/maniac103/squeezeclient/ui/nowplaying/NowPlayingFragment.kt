@@ -44,6 +44,7 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.slider.LabelFormatter
 import com.google.android.material.slider.Slider
 import de.maniac103.squeezeclient.R
+import de.maniac103.squeezeclient.cometd.ConnectionState
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.databinding.FragmentNowplayingBinding
 import de.maniac103.squeezeclient.extfuncs.backProgressInterpolator
@@ -121,6 +122,13 @@ class NowPlayingFragment :
 
     /** The song the seek above was requested for; a new song makes it stale. */
     private var pendingSeekSong: Playlist.PlaylistItem? = null
+
+    /** The play state a press asked for, shown until the server reports it back. */
+    private var pendingPlayState: PlayerStatus.PlayState? = null
+    private var pendingPlayStateJob: Job? = null
+
+    /** The last state the server reported, to fall back to when a command never lands. */
+    private var lastStatus: PlayerStatus? = null
 
     private val onBackPressedCallback = object : OnBackPressedCallback(false) {
         private var startedCollapse = false
@@ -577,8 +585,31 @@ class NowPlayingFragment :
     private fun displayPosition(status: PlayerStatus) =
         LocalPlayerPosition.forPlayer(playerId) ?: status.currentPlayPosition
 
+    /**
+     * Shows [playState] on the play/pause button until the server reports it, and falls back to
+     * the last state the server reported if it never does (e.g. the command got lost).
+     */
+    private fun showPendingPlayState(playState: PlayerStatus.PlayState) {
+        pendingPlayState = playState
+        showPlayPauseIcon(playState == PlayerStatus.PlayState.Playing)
+        pendingPlayStateJob?.cancel()
+        pendingPlayStateJob = lifecycleScope.launch {
+            delay(PLAY_STATE_TIMEOUT_MS.milliseconds)
+            pendingPlayState = null
+            lastStatus?.let { update(it) }
+        }
+    }
+
+    private fun showPlayPauseIcon(isPlaying: Boolean) {
+        binding.playPause.setImageResource(
+            // TODO: selector drawable, power state?
+            if (isPlaying) R.drawable.ic_pause_24dp else R.drawable.ic_play_24dp
+        )
+    }
+
     @OptIn(ExperimentalTime::class)
     private fun update(status: PlayerStatus) {
+        lastStatus = status
         val currentSong = status.playlist.nowPlaying
         dropStaleSeek(currentSong)
 
@@ -698,20 +729,35 @@ class NowPlayingFragment :
             }
         )
 
-        val isPlaying = status.playbackState == PlayerStatus.PlayState.Playing
-        val playPauseIconResId = when {
-            isPlaying -> R.drawable.ic_pause_24dp
-            else -> R.drawable.ic_play_24dp // TODO: selector drawable, power state?
+        // Show the state a press asked for right away; a status that is still in flight would
+        // otherwise flip the button back and forth.
+        if (pendingPlayState == status.playbackState) {
+            pendingPlayState = null
+            pendingPlayStateJob?.cancel()
         }
-        binding.playPause.setImageResource(playPauseIconResId)
+        val isPlaying = (pendingPlayState ?: status.playbackState) ==
+            PlayerStatus.PlayState.Playing
+        showPlayPauseIcon(isPlaying)
         binding.playPauseWrapper.setOnClickListener {
+            if (connectionHelper.state.value !is ConnectionState.Connected) {
+                // The request could not be delivered, so do not pretend it was.
+                listener.showTransientMessage(
+                    getString(R.string.connection_error_text_no_connection)
+                )
+                return@setOnClickListener
+            }
+            val targetState = if (isPlaying) {
+                PlayerStatus.PlayState.Paused
+            } else {
+                PlayerStatus.PlayState.Playing
+            }
+            showPendingPlayState(targetState)
             lifecycleScope.launch {
-                val targetState =
-                    if (isPlaying) PlayerStatus.PlayState.Paused else PlayerStatus.PlayState.Playing
                 connectionHelper.changePlaybackState(playerId, targetState)
             }
         }
         binding.playPauseWrapper.setOnLongClickListener {
+            showPendingPlayState(PlayerStatus.PlayState.Stopped)
             lifecycleScope.launch {
                 connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Stopped)
             }
@@ -795,6 +841,9 @@ class NowPlayingFragment :
 
         /** Time after which a drag without input is considered finished, in milliseconds. */
         private const val SLIDER_INPUT_TIMEOUT_MS = 10_000L
+
+        /** Time after which a play state we asked for is given up on, in milliseconds. */
+        private const val PLAY_STATE_TIMEOUT_MS = 3_000L
 
         fun create(playerId: PlayerId) = NowPlayingFragment().apply {
             arguments = Bundle().apply {
