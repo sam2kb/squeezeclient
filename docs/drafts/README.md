@@ -67,7 +67,7 @@ Its claims were checked against the code and what held up was fixed in the draft
 - `feature/nowplaying-favorite-toggle` `41636bd` - a failed write is a failure again: the connection
   helper reports a request failure by cancelling the coroutine, which used to skip the rollback and
   leave the icon flipped with no message.
-- `fix/volume-device-volume-fades` `1a6be78` - the ramp is ignored entirely, and every fade value
+- `fix/volume-device-volume-fades` (main `c7f7bc9`) - the ramp is ignored entirely, and every fade value
   re-arms the window, so the whole ramp - including the value it ends with - counts as one fade and
   stays out of both the player volume and the device volume. Two device reports led here: "volume
   muted after pause" (the ramp's later steps were treated as normal changes and became the device
