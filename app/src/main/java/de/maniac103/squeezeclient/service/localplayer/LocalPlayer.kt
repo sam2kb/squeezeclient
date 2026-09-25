@@ -331,6 +331,11 @@ class LocalPlayer(
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         Log.d(TAG, "onMediaItemTransition(${mediaItem?.mediaId}, $reason)")
         super.onMediaItemTransition(mediaItem, reason)
+        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+            // The player switches to the next item before the server reports the new song, so
+            // tell the position bookkeeping here instead of waiting for the media session.
+            LocalPlayerPosition.noteSongChanged()
+        }
         if (
             reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
             reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED
