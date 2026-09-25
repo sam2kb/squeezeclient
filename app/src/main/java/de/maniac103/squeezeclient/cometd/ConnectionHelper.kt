@@ -338,7 +338,12 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
         publishOneShotRequest(PlayerPowerRequest(playerId, null))
     suspend fun setPowerState(playerId: PlayerId, on: Boolean) =
         publishOneShotRequest(PlayerPowerRequest(playerId, on))
-    suspend fun sendButtonRequest(request: PlaybackButtonRequest) = publishOneShotRequest(request)
+    suspend fun sendButtonRequest(request: PlaybackButtonRequest) {
+        // A button press must not kill the app when the server is unreachable; the press
+        // simply has no effect in that case.
+        runCatching { publishOneShotRequest(request) }
+            .onFailure { Log.d(TAG, "Could not send the button request", it) }
+    }
 
     suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) {
         PositionChangeRequests.note(positionSeconds)
