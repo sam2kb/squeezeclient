@@ -18,23 +18,25 @@ gone; a 3 minute outage (below the server's limit) kept the queue.
 
 **What the change does** (built-in player only):
 - while a queue is playing or paused, its urls are stored (one per entry, as the server reports them
-  for `tags:u`) together with the playback position and whether playback was running;
+  for `tags:u`) together with the entry playback is at, the position inside that entry and whether
+  playback was running; the location is refreshed for every status and periodically (every 15 s),
+  because the server reports its position only every ~15 s (measured: 4 statuses per minute);
 - when the player connects and the server reports a playlist without entries, and the connection is
   fresh (the empty queue is not something the user asked for), the stored urls are added back -
-  `playlist add` takes a single url per command - and, when playback was running, playback is started
+  `playlist add` takes a single url per command - the queue is moved back to the stored entry
+  (`playlist index <n>` without starting it), and, when playback was running, playback is started
   and the position is restored.
 
-**Evidence** (device run 2026-09-28, built-in player, app gone for 5.5 minutes, queue of 23 tracks;
-the log lines are from the build of the integration branch - the draft itself adds no logging):
+**Evidence** (device run 2026-09-28, built-in player, 23 track queue, playback moved to entry 15 and
+the queue cleared on the server while the app was force-stopped; the log lines are from the build of
+the integration branch - the draft itself adds no logging):
 ```
-12:32:17.110  playlist: restoring the playlist of the last session (23 items)
-12:32:17.136  state: applied song=<none> idx=0 state=Stopped
-12:32:18.942  state: applied song='Track 1' [Album] idx=0 state=Playing
-12:32:19.817  local: strm-s uri=http://192.168.1.10:9000/stream.mp3?player=00:11:22:33:44:55 ...
+13:03:14.180  playlist: restoring the playlist of the last session (23 items, index 15, position 16s, playing=true)
 ```
-Server side after the same run: `playlist_tracks: 23`, `mode: play` - the queue is back and playing.
-The stored urls were checked in the app's preferences (`last_playlist_urls`, 23 entries) before the
-restore ran.
+Server side after the same run: `playlist_cur_index: 15`, `playlist_tracks: 23`, `mode: play`; 34 s
+later the app's own playback position was ~14 s, i.e. it was playing at the stored position. The
+stored location (index 15, position 16) was read back from the app's preferences before the restore
+ran.
 
 **Reproduction**:
 1. Play a queue with the built-in player and let the app report its state.
@@ -48,16 +50,16 @@ over), and the app is not the authority for it. The restore only runs for
 `appContext.prefs.localPlayerId`, and only during the first two minutes after connecting, so a queue
 the user clears while connected is never put back.
 
-Diff: 7 files, +227 (`cometd/request/AddPlaylistItemRequest.kt`,
+Diff: 7 files, +322 (`cometd/request/AddPlaylistItemRequest.kt`,
 `cometd/request/PlaylistUrlsRequest.kt`, `cometd/response/PlaylistUrlsResponse.kt`,
 `cometd/ConnectionHelper.kt`, `extfuncs/PreferenceExtensions.kt`,
 `service/mediasession/SqueezeboxMediaPlayer.kt`, `ui/nowplaying/NowPlayingFragment.kt`).
-Branch: `feature/local-player-restore-playlist` (`89a9902`, off `upstream/main` `6dacef7`), pushed to
+Branch: `feature/local-player-restore-playlist` (`e77fa61`, off `upstream/main` `6dacef7`), pushed to
 the fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`89a9902`) on top of upstream `6dacef7`; it builds and lints on its own (see
+One commit (`e77fa61`) on top of upstream `6dacef7`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`).
 
 - The draft carries `SharedPreferences.localPlayerMac` / `localPlayerId` itself so it stands alone on
@@ -69,9 +71,8 @@ One commit (`89a9902`) on top of upstream `6dacef7`; it builds and lints on its 
   Once that draft is in, the body reduces to `publishCommand(AddPlaylistItemRequest(playerId, url))`.
 - The request classes follow the existing ones (`NonPagedPlayerRequest`); `PlaylistUrlsRequest` uses
   the paging request machinery with `PagingParams.All` so the whole queue is read in one go.
-- Known limitation: the restored queue starts at its first entry, and the remembered position is the
-  position inside the track that was playing when the queue was remembered - so playback continues
-  within the queue rather than at the exact track. Restoring the queue's current index would fix
-  that and is a candidate for a follow-up (it needs one more stored value and one more command).
+- The restored queue continues at the entry and position it stopped at. The remembered position is
+  the one the server reported plus the time since it arrived, so it can be a few seconds behind the
+  moment the app actually stopped; the entry is exact.
 - The `now playing` screen clears the stored copy when the user clears the queue through its own menu,
   so an intentional clear is not undone by the next connection.

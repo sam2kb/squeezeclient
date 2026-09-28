@@ -177,7 +177,7 @@ and adopts the device volume around state toggles and external volume changes.
   ramp counts as one; verified on the device with pause/play and the `volume: ignoring fade ...` log
   line.
 
-## `feature/local-player-restore-playlist` (`89a9902`, 7 files, +227)
+## `feature/local-player-restore-playlist` (`e77fa61`, 7 files, +322)
 
 Stores the built-in player's queue (urls, one per entry) together with the playback position while
 the server still knows it, and adds it back when the player reconnects to an empty queue - the
@@ -190,19 +190,29 @@ and only when the server reports a queue without entries.
   `Slim::Player::Client::forgetClient` removes the client from `clientHash` with its playlist.
   Measured on the device: 3 minutes offline keep the queue, 5.5 minutes do not (`players` no longer
   lists the player).
-- Verified on the device (2026-09-28, built-in player, 23 track queue): the app was force-stopped
-  for 5.5 minutes, started again and the log shows
-  `playlist: restoring the playlist of the last session (23 items)` → `state: applied song=<none>` →
-  `strm-s` → `state: applied ... state=Playing`, with the server reporting `playlist_tracks: 23`,
-  `mode: play` afterwards. The stored urls were read back from the app's preferences (23 entries)
-  before the restore ran. Those log lines come from the integration branch build - the draft itself
-  adds no logging (`Diag` is integration-only).
+- Verified on the device (2026-09-28, built-in player, 23 track queue): playback moved to entry 15
+  and played for ~30 s, the queue was then cleared on the server while the app was force-stopped,
+  and starting the app again logged
+  `restoring the playlist of the last session (23 items, index 15, position 16s, playing=true)`;
+  the server then reported `playlist_cur_index: 15` with `mode: play`, and the app's own position
+  34 s later was ~14 s - i.e. it resumed at the stored position, on the stored entry. The stored
+  location was read back from the app's preferences (index 15, position 16) before the restore ran.
+  Those log lines come from the integration branch build - the draft itself adds no logging
+  (`Diag` is integration-only).
+- How the location is kept: the server reports its position only every ~15 s (measured: 4 statuses
+  per minute), so the location is stored both for every status and periodically (every 15 s) while
+  the connection is up. The draft takes the position from the server's status, advanced by the time
+  since that status arrived; the integration branch prefers the player's own position where it
+  tracks one.
 - Suspicious: `restorePlaylist` brings its own per-entry try/catch because the send helper of
   `fix/cometd-request-while-disconnected` is not part of this branch; once that lands it is one
   `publishCommand` call per entry.
-- Suspicious: the restored queue starts at its first entry - the remembered position is a position
-  inside a track. Restoring the queue's current index as well is a follow-up (one more stored value,
-  one more command), not part of this draft.
+- Suspicious: the remembered location can be a few seconds behind the moment the app dies - the
+  remembered position is the one the server reported (plus the time since it arrived), and the app
+  can only store what it knows. The restored *entry* is exact.
+- Suspicious: the client-side guards (two minutes after connecting, twelve hours age, local player
+  only) decide when a queue is put back; a queue the user cleared *while disconnected* elsewhere
+  would still be restored.
 
 ## `feature/nowplaying-favorite-toggle` (`41636bd`, 14 files)
 
