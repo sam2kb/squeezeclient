@@ -27,6 +27,7 @@ upstream. Nothing here is proposed upstream yet.
 | `fix/position-after-disconnect` | `a984d7b` | Local player: Keep the position across a server-initiated stream restart | 5 files, +275/-5 | `pr/pr-position-after-disconnect.md` |
 | `fix/session-reannounce` | `0672547` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
 | `fix/slider-drag` | `ae79fcb` | Now playing: Don't let status updates fight the position slider | 1 file, +95/-5 | `pr/pr-slider-drag.md` |
+| `fix/slimproto-write-crash` | `9539e12` | Local player: Don't crash when the slimproto connection breaks | 1 file, +16/-4 | `pr/pr-slimproto-crash.md` |
 | `fix/volume-device-volume-fades` | `557977b` | Local player: Keep the device volume across playback state changes | 3 files, +139 | `pr/pr-volume-fades.md` |
 | `feature/local-player-restore-playlist` | `def147e` | Local player: Restore the queue after the server dropped the player | 7 files, +322 | `pr/pr-local-player-restore-playlist.md` |
 | `feature/nowplaying-favorite-toggle` | `1325619` | Now playing: Add a one tap favorite toggle | 14 files, +437/-13 | PR body is on the fork (this branch had one before) |
@@ -112,13 +113,16 @@ Its claims were checked against the code and what held up was fixed in the draft
   ramp stopped at on every subscription renewal (observed 0.26 while the mixer said 40), which left
   playback quiet/muted depending on the volume mode. The draft now also touches
   `service/mediasession/SqueezeboxMediaPlayer.kt`, where several other drafts also work.
-  `check.sh` has been re-run since (`check-report.txt`): all twelve branches build on their own,
+  `check.sh` has been re-run since (`check-report.txt`): all thirteen branches build on their own,
   none of them adds a ktlint hit, and there are ten conflict pairs (see the checklist below); the
-  queue-restore feature adds none.
+  queue-restore feature and the slimproto crash fix add none.
 
 Withdrawn, not for upstream: `fix/session-reannounce`. The review showed that media3's
 `addSession`/`removeSession` never release or re-activate the framework session a head unit reads,
-and the log line its PR text quoted comes from a different commit. The branch stays as a record.
+and the log line its PR text quoted comes from a different commit. Device evidence from 2026-09-28
+backs the reviewers: the re-announce fired on a Bluetooth pause key and no media key reached the app
+for the next 29 minutes - it may detach the session rather than reactivate it. Dropping the code from
+the integration branch is the suggested next step; the branch stays as a record.
 
 Deferred to a follow-up pass (the reviews' own recommendations, not rebase-level defects):
 `fix/local-position-display` (per-player position but global duration/generation; the `sendStatus`
@@ -204,7 +208,8 @@ LMS at `http://10.10.2.45:31101/jsonrpc.js`, player id `50:85:82:13:79:5c`, app 
    `fix/volume-device-volume-fades`; and `fix/cometd-request-while-disconnected` with
    `feature/nowplaying-favorite-toggle` and with `fix/position-after-disconnect`. The second PR of
    each pair needs that rebase, and saying so in the PR text is part of the story.
-   `feature/local-player-restore-playlist` conflicts with none of them.
+   `feature/local-player-restore-playlist` conflicts with none of them, nor does
+   `fix/slimproto-write-crash`.
 6. Does it need a unit test? Upstream tests the extractors under `app/src/test`; local player
    changes usually should come with one (the stream start draft has 8).
 
@@ -221,6 +226,6 @@ For every branch it detaches the branch in a scratch worktree under
 as pre-existing and not blamed on the draft), compiles it with the Android toolchain and then checks
 every pair of drafts for merge conflicts. The report is written next to this file
 (`check-report.txt`), per-branch build output to `/tmp/drafts-check/<branch>.log`.
-The checked-in `check-report.txt` covers the review set (obsolete branches skipped): all twelve
+The checked-in `check-report.txt` covers the review set (obsolete branches skipped): all thirteen
 branches are one commit on top of `4c4c526` (upstream 2.5), compile on their own, add no ktlint hit
 of their own, and the ten conflict pairs above are the only merge conflicts between them.

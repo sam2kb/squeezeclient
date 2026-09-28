@@ -1,4 +1,4 @@
-== draft check 2026-09-28T13:37:29-04:00, upstream 4c4c526 ==
+== draft check 2026-09-28T18:28:57-04:00, upstream 4c4c526 ==
    gradle: cmd.exe /c "cd /d D:\repos\squeezeclient-drafts\scratch && gradlew.bat --quiet :app:compileFossDebugKotlin"
 --- feature/local-player-restore-playlist
     base: 0 behind / 1 ahead of upstream; diff: +322/-0 files=7
@@ -42,6 +42,10 @@
     compile: OK
 --- fix/slider-drag
     base: 0 behind / 1 ahead of upstream; diff: +95/-5 files=1
+    ktlint: upstream's pre-existing hits only
+    compile: OK
+--- fix/slimproto-write-crash
+    base: 0 behind / 1 ahead of upstream; diff: +16/-4 files=1
     ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/volume-device-volume-fades

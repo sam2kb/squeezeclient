@@ -146,6 +146,12 @@ device sends a media button without being attached, which is what a manual Bluet
 - Suspicious: `removeSession`/`addSession` timing with an active controller; the throttle value; it
   was written against the older media session implementation, so re-check whether the current code
   still needs it at all.
+- Device evidence 2026-09-28 (the "app stalled again" report): the re-announce fired on a Bluetooth
+  pause key (`key=127`, the device sent pause while the app already reported paused) and no media key
+  reached the app for the next 29 minutes, although the system still listed it as the media-button
+  session (`MediaSessionStack: updateMediaButtonSessionIfNeeded ... uid=10449`). The workaround may
+  detach the session rather than reactivate it; dropping it from the integration branch is the
+  suggested next step.
 
 ## `fix/slider-drag` (`ae79fcb`, 1 file, +95/-5)
 
@@ -159,6 +165,25 @@ positions were ignored for up to 5 s).
 - Suspicious: the hold logic is the most intricate part of the fragment; the fix assumes the song
   identity (title/artist/album) is stable for a given track. Conflicts with
   `fix/local-position-display` in `NowPlayingFragment.kt` (one hunk).
+
+## `fix/slimproto-write-crash` (`9539e12`, 1 file, +16/-4)
+
+The local player's slimproto socket write was the one socket path that let an `IOException` escape
+into the coroutine that sent the command: a FATAL `SocketException: Software caused connection
+abort` in `SlimprotoSocket$SocketHolder$write` killed the app on 2026-09-28 16:34, while the network
+was being switched and the local player was streaming. The write now catches the failure, logs it
+(`Could not send a command, closing the connection`) and closes the socket, which makes the read side
+fail and the service reconnect; `teardownSocket` closes the same way, because closing a broken socket
+can throw as well.
+
+- Verified on the device: the app survives network-off and airplane-mode on/off while playing
+  (process alive, no new FATAL, playback continues afterwards). The failing write itself could not be
+  forced on demand - whether it fails depends on the local network stack aborting the connection -
+  so the guarantee is an inspection one: no `IOException` can leave that path any more (the read path
+  already hands failures to its caller).
+- Suspicious: closing the connection on a write failure is a small behaviour change - a write error
+  used to crash, now it drops the connection and the service reconnects. That is the same path a
+  server-side close takes, so a reviewer should check that reconnect loop rather than the write.
 
 ## `fix/volume-device-volume-fades` (`557977b`, 3 files, +139)
 
