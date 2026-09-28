@@ -101,6 +101,40 @@ fun SharedPreferences.Editor.putLastSession(
     putLong("last_session_timestamp", System.currentTimeMillis())
 }
 
+val SharedPreferences.lastPlaylistPlayer: PlayerId?
+    get() = getString("last_playlist_player", null)?.let { PlayerId(it) }
+
+/** The playlist of the built-in player, one url per entry. */
+val SharedPreferences.lastPlaylistUrls: List<String>
+    get() = getString("last_playlist_urls", null)
+        ?.split('\n')
+        .orEmpty()
+        .filter { it.isNotBlank() }
+
+val SharedPreferences.lastPlaylistPosition get() = getInt("last_playlist_position", 0)
+
+val SharedPreferences.lastPlaylistWasPlaying get() =
+    getBoolean("last_playlist_was_playing", false)
+
+val SharedPreferences.lastPlaylistTimestamp get() = getLong("last_playlist_timestamp", 0L)
+
+fun SharedPreferences.Editor.putLastPlaylist(
+    playerId: PlayerId,
+    urls: List<String>,
+    positionSeconds: Int,
+    wasPlaying: Boolean
+) {
+    putString("last_playlist_player", playerId.id)
+    putString("last_playlist_urls", urls.joinToString("\n"))
+    putInt("last_playlist_position", positionSeconds)
+    putBoolean("last_playlist_was_playing", wasPlaying)
+    putLong("last_playlist_timestamp", System.currentTimeMillis())
+}
+
+fun SharedPreferences.Editor.clearLastPlaylist() {
+    remove("last_playlist_urls")
+}
+
 enum class LocalPlayerVolumeMode(val prefValue: String) {
     PlayerOnly("playeronly"),
     Device("device"),
