@@ -353,7 +353,12 @@ class SqueezeboxMediaPlayer(
             playlistFetchJob?.cancel()
             playlistFetchJob = lifecycle.coroutineScope.launch {
                 val playlist = connectionHelper.fetchPlaylist(playerId, PagingParams.All)
-                if (playlist.timestamp == status.playlist.lastChange) {
+                // A status for an empty playlist carries a fresh revision every time, and the
+                // playlist response carries yet another one - the two can never match there.
+                // Accept the response when both agree that the queue is empty; insisting on a
+                // match leaves the state stuck on the last queue forever.
+                val queueIsEmpty = playlist.items.isEmpty() && status.playlist.nowPlaying == null
+                if (playlist.timestamp == status.playlist.lastChange || queueIsEmpty) {
                     pendingPlayerState.playlist = playlist
                     // Player state update is scheduled asynchronously so that the update method
                     // notices the playlist fetch being done
@@ -372,8 +377,14 @@ class SqueezeboxMediaPlayer(
         delayedStateUpdateJob?.cancel()
 
         val status = pendingPlayerState.status ?: return
-        val nowPlaying = playerState?.currentSong
-        val newPlayerState = PlayerState(status, nowPlaying, pendingPlayerState.playlist)
+        val knownPlaylist = pendingPlayerState.playlist
+        val knownSong = playerState?.currentSong
+        // The song we knew last is only a fallback while we have no sign that the queue was
+        // emptied: an empty queue must not resurrect a song that is gone.
+        val nowPlaying = knownSong?.takeIf {
+            knownPlaylist == null || knownPlaylist.items.isNotEmpty()
+        }
+        val newPlayerState = PlayerState(status, nowPlaying, knownPlaylist)
 
         when {
             newPlayerState.isCompleteAndConsistent() || playerState == null -> {
@@ -443,8 +454,14 @@ class SqueezeboxMediaPlayer(
         val powered get() = status.powered
         val muted get() = status.muted
 
-        fun isCompleteAndConsistent() =
-            playlist != null && status.playlist.lastChange == playlist.timestamp
+        fun isCompleteAndConsistent() = playlist != null &&
+            (
+                status.playlist.lastChange == playlist.timestamp ||
+                    // A status and a playlist that agree the queue is empty are consistent as well;
+                    // their revisions can never match, because the server reports a fresh one for an
+                    // empty playlist on every request.
+                    (playlist.items.isEmpty() && status.playlist.nowPlaying == null)
+                )
     }
 
     private data class UnacknowledgedPlayerStateChange(
