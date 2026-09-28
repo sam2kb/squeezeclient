@@ -1,5 +1,9 @@
-== draft check 2026-09-28T11:54:30-04:00, upstream 6dacef7 ==
+== draft check 2026-09-28T12:40:46-04:00, upstream 6dacef7 ==
    gradle: cmd.exe /c "cd /d D:\repos\squeezeclient-drafts\scratch && gradlew.bat --quiet :app:compileFossDebugKotlin"
+--- feature/local-player-restore-playlist
+    base: 0 behind / 1 ahead of upstream; diff: +227/-0 files=7
+    ktlint: clean
+    compile: OK
 --- feature/nowplaying-favorite-toggle
     base: 0 behind / 1 ahead of upstream; diff: +437/-13 files=14
     ktlint: clean

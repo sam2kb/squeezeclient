@@ -104,8 +104,9 @@ Its claims were checked against the code and what held up was fixed in the draft
   ramp stopped at on every subscription renewal (observed 0.26 while the mixer said 40), which left
   playback quiet/muted depending on the volume mode. The draft now also touches
   `service/mediasession/SqueezeboxMediaPlayer.kt`, where several other drafts also work.
-  `check.sh` has been re-run since (`check-report.txt`): all ten branches build and lint on their
-  own, and there are ten conflict pairs (see the checklist below).
+  `check.sh` has been re-run since (`check-report.txt`): all twelve branches build and lint on their
+  own, and there are ten conflict pairs (see the checklist below); the queue-restore feature adds
+  none.
 
 Withdrawn, not for upstream: `fix/session-reannounce`. The review showed that media3's
 `addSession`/`removeSession` never release or re-activate the framework session a head unit reads,
@@ -195,6 +196,7 @@ LMS at `http://10.10.2.45:31101/jsonrpc.js`, player id `50:85:82:13:79:5c`, app 
    `fix/volume-device-volume-fades`; and `fix/cometd-request-while-disconnected` with
    `feature/nowplaying-favorite-toggle` and with `fix/position-after-disconnect`. The second PR of
    each pair needs that rebase, and saying so in the PR text is part of the story.
+   `feature/local-player-restore-playlist` conflicts with none of them.
 6. Does it need a unit test? Upstream tests the extractors under `app/src/test`; local player
    changes usually should come with one (the stream start draft has 8).
 
@@ -210,6 +212,6 @@ For every branch it detaches the branch in a scratch worktree under
 `/mnt/d/repos/squeezeclient-drafts/`, runs ktlint on `app/src`, compiles it with the Android
 toolchain and then checks every pair of drafts for merge conflicts. The report is written next to
 this file (`check-report.txt`), per-branch build output to `/tmp/drafts-check/<branch>.log`.
-The checked-in `check-report.txt` covers the review set (obsolete branches skipped): all nine
-branches are one commit on top of `6dacef7`, build and lint on their own, and the three conflict
-pairs above are the only merge conflicts between them.
+The checked-in `check-report.txt` covers the review set (obsolete branches skipped): all twelve
+branches are one commit on top of `6dacef7`, build and lint on their own, and the ten conflict pairs
+above are the only merge conflicts between them.

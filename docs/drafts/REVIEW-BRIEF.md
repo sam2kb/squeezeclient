@@ -239,7 +239,7 @@ most recent four), and a stream that resumes inside a file is given the stored s
 - Options that were rejected are documented in `pr/pr-stream-start-on-resume.md` (server download of
   the file start, priming the stream at 0, synthesizing `STREAMINFO` from a frame header).
 
-## Conflicts between drafts (three pairs, all with `fix/local-position-display`)
+## Conflicts between drafts (ten pairs)
 
 | pair | file | note |
 | --- | --- | --- |
@@ -249,6 +249,12 @@ most recent four), and a stream that resumes inside a file is given the stored s
 | `fix/mediasession-pending-track` + `fix/position-after-disconnect` | `service/mediasession/SqueezeboxMediaPlayer.kt` | both edit the Next/Previous handlers |
 | `fix/local-position-display` + `fix/volume-device-volume-fades` | `service/mediasession/SqueezeboxMediaPlayer.kt` | the volume draft publishes the mixer volume where that draft edits the state |
 | `fix/position-after-disconnect` + `fix/volume-device-volume-fades` | `service/mediasession/SqueezeboxMediaPlayer.kt` | the seek handlers vs the published volume command list |
+| `feature/nowplaying-favorite-toggle` + `fix/cometd-request-while-disconnected` | `cometd/ConnectionHelper.kt` | the favourite list uses the request helper that draft adds |
+| `fix/cometd-request-while-disconnected` + `fix/position-after-disconnect` | `cometd/ConnectionHelper.kt` | both add to the send helpers |
+| `fix/local-position-display` + `fix/nowplaying-play-pause-response` | `ui/nowplaying/NowPlayingFragment.kt` | both drive the play/pause icon |
+| `fix/nowplaying-play-pause-response` + `fix/slider-drag` | `ui/nowplaying/NowPlayingFragment.kt` | both touch the position/status update path |
 
 Each is one or two small hunks; whichever lands second needs those resolved. Every other pair
-merges cleanly (see `check-report.txt`).
+merges cleanly (see `check-report.txt`), including every pair with
+`feature/local-player-restore-playlist` - its insertions land next to, but not inside, the hunks of
+the other drafts (checked with `git merge-tree`).
