@@ -10,7 +10,7 @@ not as separate commits), which is what the test phone has been running, so thei
 combination* is what was used most of the time. The branch is not a PR; it is the review and test
 ground.
 
-## `fix/cometd-request-while-disconnected` (`feb4a80`, 3 files, +60/-23)
+## `fix/cometd-request-while-disconnected` (`f9d8a49`, 3 files, +60/-23)
 
 `ConnectionHelper.publishOneShotRequest` now throws `CometdClient.CometdException` instead of a bare
 `IllegalStateException` when the client id is not there yet, and the paging load path catches it.
@@ -38,7 +38,7 @@ ground.
   other callers is still open; the change is small, but the paging fragment swallows *all*
   exceptions now.
 
-## `fix/local-position-display` (`3bd12fa`, 5 files, +113/-10)
+## `fix/local-position-display` (`775f164`, 5 files, +113/-10)
 
 Adds `LocalPlayerPosition` (process-wide StateFlow per player) and has the now playing screen and the
 media session show the local player's own position instead of the server's, resetting it when the
@@ -56,7 +56,7 @@ song changes.
   being the active one (the server's position is right for every other player). It is the oldest of
   the four position drafts, so the other three are the ones that would need a one-hunk rebase.
 
-## `fix/mediasession-empty-queue-state` (`ef02955`, 1 file, +22/-5)
+## `fix/mediasession-empty-queue-state` (`cf0634d`, 1 file, +22/-5)
 
 Applies the server's state once its queue is empty: a playlist response is accepted when the status
 that triggered it also reports that nothing plays, that state counts as consistent, and the last
@@ -74,7 +74,7 @@ known song is no longer used as a fallback once the queue is empty.
   `fix/mediasession-pending-track` (without conflicting textually), and "both agree the queue is
   empty" is a heuristic for the server's meaningless empty-playlist revision.
 
-## `fix/mediasession-next-at-playlist-end` (`8317f8c`, 1 file, +20/-7)
+## `fix/mediasession-next-at-playlist-end` (`ec61d94`, 1 file, +20/-7)
 
 Clamps the reported playlist index and only advertises next/previous when such an item exists, which
 fixes `IllegalArgumentException: currentMediaItemIndex must be less than playlist.size()` inside
@@ -84,7 +84,7 @@ fixes `IllegalArgumentException: currentMediaItemIndex must be less than playlis
 - Suspicious: nothing much, but check that hiding the commands does not confuse controllers that
   expect them.
 
-## `fix/mediasession-pending-track` (`a8cc4fd`, 1 file, +44/-10)
+## `fix/mediasession-pending-track` (`cf815d0`, 1 file, +44/-10)
 
 Carries the expected state inside the pending state, so `getState()` does not report the previous song
 for ~1.3 s after a track change (the "new -> old -> new" flap on head units), and reports the play
@@ -102,7 +102,7 @@ state a press asked for instead of the server's until the server confirms it.
   conflicts with `fix/local-position-display` and `fix/position-after-disconnect` in
   `SqueezeboxMediaPlayer.kt` (one hunk each).
 
-## `fix/nowplaying-play-pause-response` (`c1e2bfc`, 1 file, +59/-7)
+## `fix/nowplaying-play-pause-response` (`98d42c1`, 1 file, +59/-7)
 
 Shows the play state a play/pause press asked for on the button until the server reports it, and does
 not send the press at all while the connection is down (a toast says so).
@@ -116,7 +116,7 @@ not send the press at all while the connection is down (a toast says so).
   conflicts with `fix/local-position-display` and `fix/slider-drag`, which also touch the fragment.
   It is the newest draft and has had the least device time.
 
-## `fix/position-after-disconnect` (`cab626b`, 5 files, +275/-5)
+## `fix/position-after-disconnect` (`a984d7b`, 5 files, +275/-5)
 
 Keeps the position across server-initiated stream restarts (adopts the server's position only when it
 resumed inside the song, asks the server to continue at our position when our stream was
@@ -137,7 +137,7 @@ interrupted/pause-resumed stream.
   would need an extra position request, i.e. another stream restart, per seek; the hand-off corrects
   it whenever a stream restarts anyway).
 
-## `fix/session-reannounce` (`a6b1af8`, 1 file, +28)
+## `fix/session-reannounce` (`0672547`, 1 file, +28)
 
 Re-announces the media session (`removeSession` + `addSession`, throttled, only while playing) when a
 device sends a media button without being attached, which is what a manual Bluetooth toggle does.
@@ -147,7 +147,7 @@ device sends a media button without being attached, which is what a manual Bluet
   was written against the older media session implementation, so re-check whether the current code
   still needs it at all.
 
-## `fix/slider-drag` (`3d4c247`, 1 file, +95/-5)
+## `fix/slider-drag` (`ae79fcb`, 1 file, +95/-5)
 
 Two fixes in the now playing slider: a drag is not fought by status updates (touch listener, pending
 seek, settle tolerance/timeout), and a pending seek is forgotten when the song changes (otherwise the
@@ -160,7 +160,7 @@ positions were ignored for up to 5 s).
   identity (title/artist/album) is stable for a given track. Conflicts with
   `fix/local-position-display` in `NowPlayingFragment.kt` (one hunk).
 
-## `fix/volume-device-volume-fades` (`43379a8`, 3 files, +139)
+## `fix/volume-device-volume-fades` (`557977b`, 3 files, +139)
 
 Ignores the volume the server sends while it fades into a new playback state (and while not playing)
 and adopts the device volume around state toggles and external volume changes.
@@ -177,7 +177,7 @@ and adopts the device volume around state toggles and external volume changes.
   ramp counts as one; verified on the device with pause/play and the `volume: ignoring fade ...` log
   line.
 
-## `feature/local-player-restore-playlist` (`e77fa61`, 7 files, +322)
+## `feature/local-player-restore-playlist` (`def147e`, 7 files, +322)
 
 Stores the built-in player's queue (urls, one per entry) together with the playback position while
 the server still knows it, and adds it back when the player reconnects to an empty queue - the
@@ -214,10 +214,10 @@ and only when the server reports a queue without entries.
   only) decide when a queue is put back; a queue the user cleared *while disconnected* elsewhere
   would still be restored.
 
-## `feature/nowplaying-favorite-toggle` (`41636bd`, 14 files)
+## `feature/nowplaying-favorite-toggle` (`1325619`, 14 files)
 
 Adds a favorite button to the now playing screen: shows the state of the playing track, toggles it in
-one tap, hides itself while the state is fetched. Rebased onto `6dacef7` and squashed to one commit
+one tap, hides itself while the state is fetched. Rebased onto `4c4c526` and squashed to one commit
 during this session (the old branch had three commits on an older base).
 
 - Verified: live, against the favourite list of the test account; the state fetch uses the

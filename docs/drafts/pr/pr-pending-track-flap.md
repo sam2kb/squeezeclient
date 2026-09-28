@@ -63,12 +63,12 @@ the press and kept it, with the server confirming 0.6 s later; a play press publ
 `playWhenReady=true` after 6 ms.
 
 Diff: one file, +44 / -10, nothing outside the reported state is touched.
-Branch: `fix/mediasession-pending-track` (`a8cc4fd`, off `upstream/main` `6dacef7`), pushed to the
+Branch: `fix/mediasession-pending-track` (`cf815d0`, off `upstream/main` `4c4c526`), pushed to the
 fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`a8cc4fd`) on top of upstream `6dacef7`; it builds and lints on its own (see
+One commit (`cf815d0`) on top of upstream `4c4c526`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). It conflicts with `fix/local-position-display` and
 `fix/position-after-disconnect` in `service/mediasession/SqueezeboxMediaPlayer.kt` (one small hunk
 each, all three add lines in the same place).

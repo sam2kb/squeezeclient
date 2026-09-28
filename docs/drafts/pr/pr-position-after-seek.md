@@ -1,7 +1,7 @@
 # Built-in player: the position is wrong after seeking (and after pausing/playing)
 
 **Status**: fixed in `486b53a` on `integrate/upstream-favs-sync-fix` and ported to the
-`fix/position-after-disconnect` draft (`759b462`); verified on the device.
+`fix/position-after-disconnect` draft (`a984d7b`); verified on the device.
 
 **Problem**: with the built-in player the position the app works with - and everything derived from
 it: the progress bar, the media session position, the positions reported to the server - is wrong
@@ -90,4 +90,4 @@ whenever a stream is restarted anyway.
 
 The draft carries the same code shape (`PositionChangeRequests`, `checkServerPositionAfterRestart`,
 `handOffPositionToServer`), so a cherry-pick conflicts; the three changes are applied by hand in
-`759b462` (the branch still compiles and lints cleanly).
+`a984d7b` (the branch still compiles and lints cleanly).

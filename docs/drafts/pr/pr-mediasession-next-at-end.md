@@ -45,10 +45,10 @@ java.lang.IllegalArgumentException: currentMediaItemIndex must be less than play
   so controllers do not offer buttons that cannot work.
 
 Diff: one file, +21 / -7 (`service/mediasession/SqueezeboxMediaPlayer.kt`).
-Branch: `fix/mediasession-next-at-playlist-end` (`b10065d`, off `upstream/main` `6dacef7`), pushed
+Branch: `fix/mediasession-next-at-playlist-end` (`ec61d94`, off `upstream/main` `4c4c526`), pushed
 to the fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`b10065d`) on top of upstream `6dacef7`; it builds and lints on its own (see
+One commit (`ec61d94`) on top of upstream `4c4c526`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). It does not conflict with any other draft.

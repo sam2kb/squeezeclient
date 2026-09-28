@@ -54,16 +54,16 @@ Diff: 7 files, +322 (`cometd/request/AddPlaylistItemRequest.kt`,
 `cometd/request/PlaylistUrlsRequest.kt`, `cometd/response/PlaylistUrlsResponse.kt`,
 `cometd/ConnectionHelper.kt`, `extfuncs/PreferenceExtensions.kt`,
 `service/mediasession/SqueezeboxMediaPlayer.kt`, `ui/nowplaying/NowPlayingFragment.kt`).
-Branch: `feature/local-player-restore-playlist` (`e77fa61`, off `upstream/main` `6dacef7`), pushed to
+Branch: `feature/local-player-restore-playlist` (`def147e`, off `upstream/main` `4c4c526`), pushed to
 the fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`e77fa61`) on top of upstream `6dacef7`; it builds and lints on its own (see
+One commit (`def147e`) on top of upstream `4c4c526`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`).
 
 - The draft carries `SharedPreferences.localPlayerMac` / `localPlayerId` itself so it stands alone on
-  `6dacef7` (the integration branch has them from `e45016e`); a reviewer who merges both only needs
+  `4c4c526` (the integration branch has them from `e45016e`); a reviewer who merges both only needs
   one copy of the two extensions.
 
 - `ConnectionHelper.restorePlaylist` catches per entry and rethrows cancellation, because the send

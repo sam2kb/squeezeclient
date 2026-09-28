@@ -51,12 +51,12 @@ With the change, clearing the queue while playing does this instead:
 - do not fall back to the previously known song once the queue is empty.
 
 Diff: one file, +22 / -5 (`service/mediasession/SqueezeboxMediaPlayer.kt`).
-Branch: `fix/mediasession-empty-queue-state` (`ef02955`, off `upstream/main` `6dacef7`), pushed to
+Branch: `fix/mediasession-empty-queue-state` (`cf0634d`, off `upstream/main` `4c4c526`), pushed to
 the fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`ef02955`) on top of upstream `6dacef7`; it builds and lints on its own (see
+One commit (`cf0634d`) on top of upstream `4c4c526`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`).
 
 Note the interaction with `fix/mediasession-next-at-playlist-end`: that draft makes `getState()` skip
