@@ -74,7 +74,7 @@ known song is no longer used as a fallback once the queue is empty.
   `fix/mediasession-pending-track` (without conflicting textually), and "both agree the queue is
   empty" is a heuristic for the server's meaningless empty-playlist revision.
 
-## `fix/mediasession-next-at-playlist-end` (`b10065d`, 1 file, +13/-6)
+## `fix/mediasession-next-at-playlist-end` (`8317f8c`, 1 file, +20/-7)
 
 Clamps the reported playlist index and only advertises next/previous when such an item exists, which
 fixes `IllegalArgumentException: currentMediaItemIndex must be less than playlist.size()` inside
@@ -116,7 +116,7 @@ not send the press at all while the connection is down (a toast says so).
   conflicts with `fix/local-position-display` and `fix/slider-drag`, which also touch the fragment.
   It is the newest draft and has had the least device time.
 
-## `fix/position-after-disconnect` (`759b462`, 4 files, +274/-5)
+## `fix/position-after-disconnect` (`cab626b`, 5 files, +275/-5)
 
 Keeps the position across server-initiated stream restarts (adopts the server's position only when it
 resumed inside the song, asks the server to continue at our position when our stream was
@@ -160,7 +160,7 @@ positions were ignored for up to 5 s).
   identity (title/artist/album) is stable for a given track. Conflicts with
   `fix/local-position-display` in `NowPlayingFragment.kt` (one hunk).
 
-## `fix/volume-device-volume-fades` (`ba7f766`, 1 file, +61)
+## `fix/volume-device-volume-fades` (`43379a8`, 3 files, +139)
 
 Ignores the volume the server sends while it fades into a new playback state (and while not playing)
 and adopts the device volume around state toggles and external volume changes.
@@ -177,7 +177,34 @@ and adopts the device volume around state toggles and external volume changes.
   ramp counts as one; verified on the device with pause/play and the `volume: ignoring fade ...` log
   line.
 
-## `feature/nowplaying-favorite-toggle` (`6dc0c91`, 14 files)
+## `feature/local-player-restore-playlist` (`89a9902`, 7 files, +227)
+
+Stores the built-in player's queue (urls, one per entry) together with the playback position while
+the server still knows it, and adds it back when the player reconnects to an empty queue - the
+server forgets a player that stays disconnected for more than five minutes, and with it the queue.
+The restore only runs for `appContext.prefs.localPlayerId`, only within two minutes of connecting,
+and only when the server reports a queue without entries.
+
+- Why the server forgets the player: `Slim::Networking::Slimproto` keeps
+  `my $forget_disconnected_time = 300;` - after five minutes it sends `['client','forget']` and
+  `Slim::Player::Client::forgetClient` removes the client from `clientHash` with its playlist.
+  Measured on the device: 3 minutes offline keep the queue, 5.5 minutes do not (`players` no longer
+  lists the player).
+- Verified on the device (2026-09-28, built-in player, 23 track queue): the app was force-stopped
+  for 5.5 minutes, started again and the log shows
+  `playlist: restoring the playlist of the last session (23 items)` → `state: applied song=<none>` →
+  `strm-s` → `state: applied ... state=Playing`, with the server reporting `playlist_tracks: 23`,
+  `mode: play` afterwards. The stored urls were read back from the app's preferences (23 entries)
+  before the restore ran. Those log lines come from the integration branch build - the draft itself
+  adds no logging (`Diag` is integration-only).
+- Suspicious: `restorePlaylist` brings its own per-entry try/catch because the send helper of
+  `fix/cometd-request-while-disconnected` is not part of this branch; once that lands it is one
+  `publishCommand` call per entry.
+- Suspicious: the restored queue starts at its first entry - the remembered position is a position
+  inside a track. Restoring the queue's current index as well is a follow-up (one more stored value,
+  one more command), not part of this draft.
+
+## `feature/nowplaying-favorite-toggle` (`41636bd`, 14 files)
 
 Adds a favorite button to the now playing screen: shows the state of the playing track, toggles it in
 one tap, hides itself while the state is fetched. Rebased onto `6dacef7` and squashed to one commit

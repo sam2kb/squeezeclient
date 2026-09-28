@@ -28,6 +28,7 @@ upstream. Nothing here is proposed upstream yet.
 | `fix/session-reannounce` | `a6b1af8` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
 | `fix/slider-drag` | `3d4c247` | Now playing: Don't let status updates fight the position slider | 1 file, +95/-5 | `pr/pr-slider-drag.md` |
 | `fix/volume-device-volume-fades` | `43379a8` | Local player: Keep the device volume across playback state changes | 3 files, +139 | `pr/pr-volume-fades.md` |
+| `feature/local-player-restore-playlist` | `89a9902` | Local player: Restore the queue after the server dropped the player | 7 files, +227 | `pr/pr-local-player-restore-playlist.md` |
 | `feature/nowplaying-favorite-toggle` | `41636bd` | Now playing: Add a one tap favorite toggle | 14 files, +437/-13 | PR body is on the fork (this branch had one before) |
 
 Two more drafts have no branch of their own:

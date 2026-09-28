@@ -55,7 +55,7 @@ queue. The reason is a decode failure on the stream the server resumes *inside* 
 the server reacted in its own log:
 
 ```
-[26-09-21 21:29:18.1162] Slim::Player::Squeezebox2::statHandler (153) Error: 50:85:82:13:79:5c:
+[26-09-21 21:29:18.1162] Slim::Player::Squeezebox2::statHandler (153) Error: 00:11:22:33:44:55:
     Decoder does not support file format, code 0
 ```
 
