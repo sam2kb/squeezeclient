@@ -56,6 +56,24 @@ song changes.
   being the active one (the server's position is right for every other player). It is the oldest of
   the four position drafts, so the other three are the ones that would need a one-hunk rebase.
 
+## `fix/mediasession-empty-queue-state` (`ef02955`, 1 file, +22/-5)
+
+Applies the server's state once its queue is empty: a playlist response is accepted when the status
+that triggered it also reports that nothing plays, that state counts as consistent, and the last
+known song is no longer used as a fallback once the queue is empty.
+
+- Why: for an empty playlist the server reports a fresh revision on every request, so the playlist
+  response never matches the revision it was fetched for - the response was dropped and no further
+  state update was scheduled, so the session kept reporting the last song (frozen position) for as
+  long as the queue stayed empty.
+- Verified on the device (2026-09-28, built-in player): playing, then `playlist clear` on the server
+  - the app applied `song=<none> idx=0 state=Stopped` within a second and the session metadata
+  cleared. The before case is in `build/logs/diag-20260928.log`: an hour without a single apply,
+  109/109 revision mismatches for empty playlists against 3/3 matches for queues with items.
+- Suspicious: it works in the same `applyPlayerState`/`schedulePlayerStateUpdate` area as
+  `fix/mediasession-pending-track` (without conflicting textually), and "both agree the queue is
+  empty" is a heuristic for the server's meaningless empty-playlist revision.
+
 ## `fix/mediasession-next-at-playlist-end` (`b10065d`, 1 file, +13/-6)
 
 Clamps the reported playlist index and only advertises next/previous when such an item exists, which

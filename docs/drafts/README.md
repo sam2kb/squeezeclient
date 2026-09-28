@@ -20,6 +20,7 @@ upstream. Nothing here is proposed upstream yet.
 | --- | --- | --- | --- | --- |
 | `fix/cometd-request-while-disconnected` | `feb4a80` | CometD: Don't crash when a request is submitted while disconnected | 3 files, +60/-23 | `pr/pr-cometd-crash.md` |
 | `fix/local-position-display` | `3bd12fa` | Show the position the local player plays instead of the server's estimate | 5 files, +113/-10 | `pr/pr-local-position-display.md` |
+| `fix/mediasession-empty-queue-state` | `ef02955` | Media session: Follow the server when its queue becomes empty | 1 file, +22/-5 | `pr/pr-mediasession-empty-queue.md` |
 | `fix/mediasession-next-at-playlist-end` | `8317f8c` | Media session: Keep the reported playlist index inside the list | 1 file, +20/-7 | `pr/pr-mediasession-next-at-end.md` |
 | `fix/mediasession-pending-track` | `a8cc4fd` | Report the state we asked for until the server confirms it | 1 file, +44/-10 | `pr/pr-pending-track-flap.md` |
 | `fix/nowplaying-play-pause-response` | `c1e2bfc` | Now playing: Show the play state a press asked for right away | 1 file, +59/-7 | `pr/pr-nowplaying-play-pause.md` |
@@ -70,7 +71,14 @@ Its claims were checked against the code and what held up was fixed in the draft
   the surface the user watches (0.6 s measured, long enough that a press looks ignored and is
   repeated - the logs of a flaky session show pause arriving three to six times per press). The
   button now shows the state a press asked for until the server reports it, and a press is not sent
-  at all while the connection is down (a toast says so). This is a new draft from 2026-09-25.- `fix/mediasession-next-at-playlist-end` `8317f8c` - an empty playlist window no longer falls into
+  at all while the connection is down (a toast says so). This is a new draft from 2026-09-25.
+- `fix/mediasession-empty-queue-state` `ef02955` - "the app stalls on network change/blip" (device
+  report 2026-09-28): the server had stopped the player and cleared its queue, and the app never
+  applied any of the statuses describing that (a playlist response for an empty queue can never
+  match the revision it was fetched for), so the session kept reporting the last song with a frozen
+  position - an hour in `build/logs/diag-20260928.log` (queue empty since 10:36, last apply 10:46).
+  Verified on the device: clearing the queue while playing applies `song=<none>` within a second and
+  the session metadata clears.- `fix/mediasession-next-at-playlist-end` `8317f8c` - an empty playlist window no longer falls into
   the clamp (`coerceIn(n, n-1)` throws; now `takeIf { it.items.isNotEmpty() }`), and the skip
   commands are advertised against the server's track count instead of the published window, so a
   truncated playlist does not hide Next.
