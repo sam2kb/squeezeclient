@@ -111,6 +111,8 @@ val SharedPreferences.lastPlaylistUrls: List<String>
         .orEmpty()
         .filter { it.isNotBlank() }
 
+val SharedPreferences.lastPlaylistIndex get() = getInt("last_playlist_index", 0)
+
 val SharedPreferences.lastPlaylistPosition get() = getInt("last_playlist_position", 0)
 
 val SharedPreferences.lastPlaylistWasPlaying get() =
@@ -121,11 +123,13 @@ val SharedPreferences.lastPlaylistTimestamp get() = getLong("last_playlist_times
 fun SharedPreferences.Editor.putLastPlaylist(
     playerId: PlayerId,
     urls: List<String>,
+    index: Int,
     positionSeconds: Int,
     wasPlaying: Boolean
 ) {
     putString("last_playlist_player", playerId.id)
     putString("last_playlist_urls", urls.joinToString("\n"))
+    putInt("last_playlist_index", index)
     putInt("last_playlist_position", positionSeconds)
     putBoolean("last_playlist_was_playing", wasPlaying)
     putLong("last_playlist_timestamp", System.currentTimeMillis())
