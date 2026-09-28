@@ -4,7 +4,8 @@
 #
 #   1. detaches each branch in one scratch worktree (the main working tree is untouched, and the
 #      Gradle build stays warm, so each branch only costs a recompile)
-#   2. runs ktlint on app/src and compiles it with the Android toolchain
+#   2. runs ktlint on app/src (ignoring hits upstream itself has) and compiles it with the Android
+#      toolchain
 #   3. reports which branches would conflict with each other when both get merged
 #
 # Usage: bash docs/drafts/check.sh [branch ...]      (default: all reviewable fix/* and feature/*)
@@ -60,6 +61,16 @@ if ! git worktree add --force --detach "$SCRATCH" "$UPSTREAM" >/dev/null 2>&1; t
 fi
 cp -f local.properties "$SCRATCH/local.properties" 2>/dev/null
 
+# ktlint baseline: upstream itself need not be clean, and a draft must not be blamed for that
+BASE_WT="$WORKDIR/base"
+git worktree remove --force "$BASE_WT" >/dev/null 2>&1
+BASELINE_LINT=""
+if git worktree add --force --detach "$BASE_WT" "$UPSTREAM" >/dev/null 2>&1; then
+    cp -f local.properties "$BASE_WT/local.properties" 2>/dev/null
+    BASELINE_LINT=$(cd "$BASE_WT" && sh "$KTLINT" "app/src/**/*.kt" 2>&1 | grep -E "\.kt:[0-9]+:[0-9]+:" | sed "s|$BASE_WT/||" | sort)
+    git worktree remove --force "$BASE_WT" >/dev/null 2>&1
+fi
+
 echo "== draft check $(date -Is), upstream $UPSTREAM ==" | tee -a "$REPORT"
 echo "   gradle: $GRADLE_CMD" | tee -a "$REPORT"
 FAILED=""
@@ -78,12 +89,15 @@ for branch in $BRANCHES; do
     size=$(git diff --numstat "$UPSTREAM" "$branch" 2>/dev/null | awk '{a+=$1; d+=$2} END {printf "+%d/-%d files=%d", a, d, NR}')
     echo "    base: $behind behind / $ahead ahead of upstream; diff: $size" | tee -a "$REPORT"
 
-    ktlint_out=$(cd "$SCRATCH" && sh "$KTLINT" "app/src/**/*.kt" 2>&1 | head -3)
-    if [ -n "$ktlint_out" ]; then
-        echo "    ktlint: issues ($log)" | tee -a "$REPORT"
-        echo "$ktlint_out" | sed 's/^/        /' | tee -a "$REPORT"
-    else
+    ktlint_out=$(cd "$SCRATCH" && sh "$KTLINT" "app/src/**/*.kt" 2>&1 | grep -E "\.kt:[0-9]+:[0-9]+:" | sed "s|$SCRATCH/||" | sort)
+    if [ -z "$ktlint_out" ]; then
         echo "    ktlint: clean" | tee -a "$REPORT"
+    elif [ -n "$BASELINE_LINT" ] && [ "$ktlint_out" = "$BASELINE_LINT" ]; then
+        echo "    ktlint: upstream's pre-existing hits only" | tee -a "$REPORT"
+    else
+        echo "    ktlint: issues ($log)" | tee -a "$REPORT"
+        printf '%s\n' "$ktlint_out" | grep -vxF -f <(printf '%s\n' "$BASELINE_LINT") | head -3 \
+            | sed 's/^/        /' | tee -a "$REPORT"
     fi
 
     if (cd "$SCRATCH" && eval "$GRADLE_CMD") > "$log" 2>&1; then

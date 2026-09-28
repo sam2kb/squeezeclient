@@ -1,52 +1,52 @@
-== draft check 2026-09-28T13:04:08-04:00, upstream 6dacef7 ==
+== draft check 2026-09-28T13:37:29-04:00, upstream 4c4c526 ==
    gradle: cmd.exe /c "cd /d D:\repos\squeezeclient-drafts\scratch && gradlew.bat --quiet :app:compileFossDebugKotlin"
 --- feature/local-player-restore-playlist
     base: 0 behind / 1 ahead of upstream; diff: +322/-0 files=7
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- feature/nowplaying-favorite-toggle
     base: 0 behind / 1 ahead of upstream; diff: +437/-13 files=14
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/cometd-request-while-disconnected
     base: 0 behind / 1 ahead of upstream; diff: +60/-23 files=3
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/local-position-display
     base: 0 behind / 1 ahead of upstream; diff: +113/-10 files=5
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/mediasession-empty-queue-state
     base: 0 behind / 1 ahead of upstream; diff: +22/-5 files=1
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/mediasession-next-at-playlist-end
     base: 0 behind / 1 ahead of upstream; diff: +20/-7 files=1
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/mediasession-pending-track
     base: 0 behind / 1 ahead of upstream; diff: +44/-10 files=1
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/nowplaying-play-pause-response
     base: 0 behind / 1 ahead of upstream; diff: +59/-7 files=1
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/position-after-disconnect
     base: 0 behind / 1 ahead of upstream; diff: +275/-5 files=5
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/session-reannounce
     base: 0 behind / 1 ahead of upstream; diff: +28/-0 files=1
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/slider-drag
     base: 0 behind / 1 ahead of upstream; diff: +95/-5 files=1
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/volume-device-volume-fades
     base: 0 behind / 1 ahead of upstream; diff: +139/-0 files=3
-    ktlint: clean
+    ktlint: upstream's pre-existing hits only
     compile: OK
 
 == merge conflicts between drafts (every pair) ==
