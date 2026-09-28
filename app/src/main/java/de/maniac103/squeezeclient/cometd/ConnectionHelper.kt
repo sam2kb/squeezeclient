@@ -19,6 +19,7 @@ package de.maniac103.squeezeclient.cometd
 
 import android.util.Log
 import de.maniac103.squeezeclient.SqueezeClientApplication
+import de.maniac103.squeezeclient.cometd.request.AddPlaylistItemRequest
 import de.maniac103.squeezeclient.cometd.request.ChangePlaybackStateRequest
 import de.maniac103.squeezeclient.cometd.request.ClearPlaylistRequest
 import de.maniac103.squeezeclient.cometd.request.ExecuteActionRequest
@@ -34,6 +35,7 @@ import de.maniac103.squeezeclient.cometd.request.MovePlaylistItemRequest
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.cometd.request.PlayerPowerRequest
 import de.maniac103.squeezeclient.cometd.request.PlayerStatusRequest
+import de.maniac103.squeezeclient.cometd.request.PlaylistUrlsRequest
 import de.maniac103.squeezeclient.cometd.request.RadioSearchRequest
 import de.maniac103.squeezeclient.cometd.request.RemovePlaylistItemRequest
 import de.maniac103.squeezeclient.cometd.request.Request
@@ -53,6 +55,7 @@ import de.maniac103.squeezeclient.cometd.response.DownloadSongInfoListResponse
 import de.maniac103.squeezeclient.cometd.response.JiveHomeItemListResponse
 import de.maniac103.squeezeclient.cometd.response.LocalSearchResultsResponse
 import de.maniac103.squeezeclient.cometd.response.PlayerStatusResponse
+import de.maniac103.squeezeclient.cometd.response.PlaylistUrlsResponse
 import de.maniac103.squeezeclient.cometd.response.ServerStatusResponse
 import de.maniac103.squeezeclient.cometd.response.SlideshowListResponse
 import de.maniac103.squeezeclient.cometd.response.SlimBrowseListResponse
@@ -259,6 +262,46 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
         doRequestWithResult<PlayerStatusResponse>(
             PlayerStatusRequest(playerId, page)
         ).asModelPlaylist(json, page.start.toInt())
+
+    /**
+     * The urls of the player's playlist, in order, or null if they could not be read. Neither is
+     * part of the menu flavored status the UI uses, but the built-in player needs them to restore
+     * its playlist after the server dropped the player.
+     */
+    suspend fun fetchPlaylistUrls(playerId: PlayerId): List<String>? = runCatching {
+        doRequestWithResult<PlaylistUrlsResponse>(PlaylistUrlsRequest(playerId)).urls
+            .takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    /**
+     * Moves the player's queue to the given entry without starting playback, so a restored queue
+     * continues where it stopped.
+     */
+    suspend fun setPlaylistPosition(playerId: PlayerId, position: Int) {
+        try {
+            publishOneShotRequest(
+                SetPlaylistPositionRequest(playerId, position, appContext.prefs.fadeInDuration)
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not set playlist position $position", e)
+        }
+    }
+
+    /** Restores a playlist from its urls; the server only takes a single url per command. */
+    suspend fun restorePlaylist(playerId: PlayerId, urls: List<String>) {
+        urls.forEach { url ->
+            try {
+                publishOneShotRequest(AddPlaylistItemRequest(playerId, url))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Keep going: a partially restored playlist is still better than none at all.
+                Log.w(TAG, "Could not restore playlist entry $url", e)
+            }
+        }
+    }
 
     suspend fun movePlaylistItem(playerId: PlayerId, fromPosition: Int, toPosition: Int) =
         publishOneShotRequest(MovePlaylistItemRequest(playerId, fromPosition, toPosition))
