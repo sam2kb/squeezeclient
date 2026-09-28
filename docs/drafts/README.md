@@ -8,47 +8,55 @@ the fork and review every draft without access to this workstation.
 one-commit branches on top of upstream, to be proposed one at a time. The scratch originals stay in
 git-ignored `build/drafts/`.
 
-All branches are single commits on top of upstream `maniac103/squeezeclient` as of `6dacef7`, and
+All branches are single commits on top of upstream `maniac103/squeezeclient` as of `4c4c526`, and
 they are pushed to the fork `origin` (`git@github.com:sam2kb/squeezeclient.git`) - **not** to
 upstream. Nothing here is proposed upstream yet.
 
 ## The review set (pushed to `origin`, ready to review)
 
-`diff` = what the PR would add (`git diff --shortstat 6dacef7 <branch>`); PR text = file in `pr/`.
+`diff` = what the PR would add (`git diff --shortstat 4c4c526 <branch>`); PR text = file in `pr/`.
 
 | branch | commit | subject | diff | PR text |
 | --- | --- | --- | --- | --- |
-| `fix/cometd-request-while-disconnected` | `feb4a80` | CometD: Don't crash when a request is submitted while disconnected | 3 files, +60/-23 | `pr/pr-cometd-crash.md` |
-| `fix/local-position-display` | `3bd12fa` | Show the position the local player plays instead of the server's estimate | 5 files, +113/-10 | `pr/pr-local-position-display.md` |
-| `fix/mediasession-empty-queue-state` | `ef02955` | Media session: Follow the server when its queue becomes empty | 1 file, +22/-5 | `pr/pr-mediasession-empty-queue.md` |
-| `fix/mediasession-next-at-playlist-end` | `8317f8c` | Media session: Keep the reported playlist index inside the list | 1 file, +20/-7 | `pr/pr-mediasession-next-at-end.md` |
-| `fix/mediasession-pending-track` | `a8cc4fd` | Report the state we asked for until the server confirms it | 1 file, +44/-10 | `pr/pr-pending-track-flap.md` |
-| `fix/nowplaying-play-pause-response` | `c1e2bfc` | Now playing: Show the play state a press asked for right away | 1 file, +59/-7 | `pr/pr-nowplaying-play-pause.md` |
-| `fix/position-after-disconnect` | `cab626b` | Local player: Keep the position across a server-initiated stream restart | 5 files, +275/-5 | `pr/pr-position-after-disconnect.md` |
-| `fix/session-reannounce` | `a6b1af8` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
-| `fix/slider-drag` | `3d4c247` | Now playing: Don't let status updates fight the position slider | 1 file, +95/-5 | `pr/pr-slider-drag.md` |
-| `fix/volume-device-volume-fades` | `43379a8` | Local player: Keep the device volume across playback state changes | 3 files, +139 | `pr/pr-volume-fades.md` |
-| `feature/local-player-restore-playlist` | `e77fa61` | Local player: Restore the queue after the server dropped the player | 7 files, +322 | `pr/pr-local-player-restore-playlist.md` |
-| `feature/nowplaying-favorite-toggle` | `41636bd` | Now playing: Add a one tap favorite toggle | 14 files, +437/-13 | PR body is on the fork (this branch had one before) |
+| `fix/cometd-request-while-disconnected` | `f9d8a49` | CometD: Don't crash when a request is submitted while disconnected | 3 files, +60/-23 | `pr/pr-cometd-crash.md` |
+| `fix/local-position-display` | `775f164` | Show the position the local player plays instead of the server's estimate | 5 files, +113/-10 | `pr/pr-local-position-display.md` |
+| `fix/mediasession-empty-queue-state` | `cf0634d` | Media session: Follow the server when its queue becomes empty | 1 file, +22/-5 | `pr/pr-mediasession-empty-queue.md` |
+| `fix/mediasession-next-at-playlist-end` | `ec61d94` | Media session: Keep the reported playlist index inside the list | 1 file, +20/-7 | `pr/pr-mediasession-next-at-end.md` |
+| `fix/mediasession-pending-track` | `cf815d0` | Report the state we asked for until the server confirms it | 1 file, +44/-10 | `pr/pr-pending-track-flap.md` |
+| `fix/nowplaying-play-pause-response` | `98d42c1` | Now playing: Show the play state a press asked for right away | 1 file, +59/-7 | `pr/pr-nowplaying-play-pause.md` |
+| `fix/position-after-disconnect` | `a984d7b` | Local player: Keep the position across a server-initiated stream restart | 5 files, +275/-5 | `pr/pr-position-after-disconnect.md` |
+| `fix/session-reannounce` | `0672547` | MediaService: Re-announce the session when a device isn't monitoring it | 1 file, +28 | `pr/pr-session-reannounce.md` |
+| `fix/slider-drag` | `ae79fcb` | Now playing: Don't let status updates fight the position slider | 1 file, +95/-5 | `pr/pr-slider-drag.md` |
+| `fix/volume-device-volume-fades` | `557977b` | Local player: Keep the device volume across playback state changes | 3 files, +139 | `pr/pr-volume-fades.md` |
+| `feature/local-player-restore-playlist` | `def147e` | Local player: Restore the queue after the server dropped the player | 7 files, +322 | `pr/pr-local-player-restore-playlist.md` |
+| `feature/nowplaying-favorite-toggle` | `1325619` | Now playing: Add a one tap favorite toggle | 14 files, +437/-13 | PR body is on the fork (this branch had one before) |
 
 Two more drafts have no branch of their own:
 
 | draft | where | why |
 | --- | --- | --- |
-| stream start on resume (built-in player) | `main`, commit `f6fc998` | uses the current-track-info request of the favorite toggle, so it does not stand alone on `6dacef7` - `pr/pr-stream-start-on-resume.md` |
-| position a seek asked for | inside `fix/position-after-disconnect` (`759b462`) | written on top of `PositionChangeRequests`; ported by hand, see `pr/pr-position-after-seek.md` |
+| stream start on resume (built-in player) | `main`, commit `f6fc998` | uses the current-track-info request of the favorite toggle, so it does not stand alone on `4c4c526` - `pr/pr-stream-start-on-resume.md` |
+| position a seek asked for | inside `fix/position-after-disconnect` (`a984d7b`) | written on top of `PositionChangeRequests`; ported by hand, see `pr/pr-position-after-seek.md` |
 
-Rebase state: `feature/nowplaying-favorite-toggle` was rebased onto `6dacef7` and squashed to one
-commit after this session started - everything else in the table above was already a single commit
-on `6dacef7`. Conflict-free rebases were possible for nine of the older branches; the rest are
-listed as obsolete below.
+Rebase state: every branch in the table above was rebased onto upstream's 2.5 release
+(`4c4c526`) on 2026-09-28, none of them with a conflict - the release only touches dependency
+versions, the version bump and one download-info field, and no review-set branch touches any of those
+files. The obsolete branches below still sit on the older base `6dacef7`.
+
+Watch item: `upstream/compose` (unmerged, WIP as of 2026-09-28, 54 files) converts the home menu,
+slimbrowse, context menu and playlist screens to Compose and **deletes `BasePagingListFragment.kt`**.
+If it lands on main, `fix/cometd-request-while-disconnected` only needs to drop its paging catch (the
+file is gone - the tolerant command sending is the bigger half and stays) and
+`feature/nowplaying-favorite-toggle` needs its `DisplayStatusFragment` change ported; nothing else is
+touched (the branch's only change to `SqueezeboxMediaPlayer.kt` is two lines, and `NowPlayingFragment`
+is not in it at all).
 
 ## Review outcome (2026-09-22, device follow-ups 2026-09-25)
 
 An independent review of every draft lives in `reviews/` (written on `review/draft-prs`, `a3c654e`).
 Its claims were checked against the code and what held up was fixed in the drafts:
 
-- `fix/cometd-request-while-disconnected` `feb4a80` - the paging catch is limited to the two
+- `fix/cometd-request-while-disconnected` `f9d8a49` - the paging catch is limited to the two
   exceptions this request path produces and rethrows cancellation (the old `catch (e: Exception)`
   turned bugs into an empty list and swallowed Paging's cancellation); the subscription flow's
   initial-request catch now really does catch every failure, as its comment claims. A device report
@@ -58,35 +66,35 @@ Its claims were checked against the code and what held up was fixed in the draft
   (play/pause/stop, volume, mute, position, playlist edits) is dropped instead of failing its caller
   - with the client gone, the caller's coroutine - the UI starts them from the lifecycle scope - used
   to die with it.
-- `fix/local-position-display` `3bd12fa` - a device report ("the next track kept counting on from
+- `fix/local-position-display` `775f164` - a device report ("the next track kept counting on from
   the previous song's position after a resume") added the missing piece: the built-in player
   switches media items before the server reports the new song, so the bookkeeping is reset on the
   media item transition (`LocalPlayer.onMediaItemTransition`) instead of waiting for the media
-  session.- `fix/mediasession-pending-track` `a8cc4fd` - the play/pause button flap of the same kind: the
+  session.- `fix/mediasession-pending-track` `cf815d0` - the play/pause button flap of the same kind: the
   session reported the server's play state, so a press only showed up after the round trip, and a
   status still in flight flipped the button back. The pending state carries the play state as well
   now and is only dropped once the server confirms it. Verified on the device: pause published
   `playWhenReady=false` 8 ms after the press and kept it, the server confirming 0.6 s later; play
   likewise after 6 ms.
-- `fix/nowplaying-play-pause-response` `c1e2bfc` - the now playing screen had the same latency on
+- `fix/nowplaying-play-pause-response` `98d42c1` - the now playing screen had the same latency on
   the surface the user watches (0.6 s measured, long enough that a press looks ignored and is
   repeated - the logs of a flaky session show pause arriving three to six times per press). The
   button now shows the state a press asked for until the server reports it, and a press is not sent
   at all while the connection is down (a toast says so). This is a new draft from 2026-09-25.
-- `fix/mediasession-empty-queue-state` `ef02955` - "the app stalls on network change/blip" (device
+- `fix/mediasession-empty-queue-state` `cf0634d` - "the app stalls on network change/blip" (device
   report 2026-09-28): the server had stopped the player and cleared its queue, and the app never
   applied any of the statuses describing that (a playlist response for an empty queue can never
   match the revision it was fetched for), so the session kept reporting the last song with a frozen
   position - an hour in `build/logs/diag-20260928.log` (queue empty since 10:36, last apply 10:46).
   Verified on the device: clearing the queue while playing applies `song=<none>` within a second and
-  the session metadata clears.- `fix/mediasession-next-at-playlist-end` `8317f8c` - an empty playlist window no longer falls into
+  the session metadata clears.- `fix/mediasession-next-at-playlist-end` `ec61d94` - an empty playlist window no longer falls into
   the clamp (`coerceIn(n, n-1)` throws; now `takeIf { it.items.isNotEmpty() }`), and the skip
   commands are advertised against the server's track count instead of the published window, so a
   truncated playlist does not hide Next.
-- `fix/position-after-disconnect` `cab626b` - the port had dropped the track-change
+- `fix/position-after-disconnect` `a984d7b` - the port had dropped the track-change
   `PositionChangeRequests.note()` calls of the Next/Previous buttons; they are back. The
   stream-URL comparison (dead - every LMS stream has the same URL) is gone.
-- `feature/nowplaying-favorite-toggle` `41636bd` - a failed write is a failure again: the connection
+- `feature/nowplaying-favorite-toggle` `1325619` - a failed write is a failure again: the connection
   helper reports a request failure by cancelling the coroutine, which used to skip the rollback and
   leave the icon flipped with no message.
 - `fix/volume-device-volume-fades` (main `c7f7bc9`) - the ramp is ignored entirely, and every fade value
@@ -98,7 +106,7 @@ Its claims were checked against the code and what held up was fixed in the draft
   Verified on the device: pause and play move neither volume, and the log shows
   `volume: ignoring fade 0.30... (playing=false)`.
 
-  **Ported to the draft** (`43379a8`, 3 files, +139): the status volume (`vol`) is the authority -
+  **Ported to the draft** (`557977b`, 3 files, +139): the status volume (`vol`) is the authority -
   `LocalPlayerVolume` publishes it, the local player applies it, and a volume clearly below it (or
   lower than the last one while nothing plays) is ignored. Reason: LMS repeats the value its fade
   ramp stopped at on every subscription renewal (observed 0.26 while the mixer said 40), which left
@@ -142,8 +150,8 @@ Older copies of some of these are still on the fork from before; ignore them.
 git clone git@github.com:sam2kb/squeezeclient.git && cd squeezeclient
 git remote add upstream https://github.com/maniac103/squeezeclient.git
 git fetch --all
-git checkout <branch>                 # every branch in the review set is one commit on 6dacef7
-git log --stat 6dacef7..HEAD          # what the PR would change
+git checkout <branch>                 # every branch in the review set is one commit on 4c4c526
+git log --stat 4c4c526..HEAD          # what the PR would change
 bash docs/drafts/check.sh <branch>    # worktree + ktlint + compile, per branch
 ```
 
