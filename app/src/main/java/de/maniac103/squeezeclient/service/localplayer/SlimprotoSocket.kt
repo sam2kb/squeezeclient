@@ -92,7 +92,7 @@ class SlimprotoSocket(prefs: SharedPreferences) {
     }
 
     private fun teardownSocket() {
-        socket?.close()
+        socket?.closeQuietly()
         socket = null
     }
 
@@ -430,10 +430,22 @@ class SlimprotoSocket(prefs: SharedPreferences) {
         }
 
         suspend fun write(data: ByteBuffer) = withContext(Dispatchers.IO) {
-            synchronized(sink) {
-                sink.write(data)
-                sink.flush()
+            try {
+                synchronized(sink) {
+                    sink.write(data)
+                    sink.flush()
+                }
+            } catch (e: IOException) {
+                // The connection went away while a command was being sent (the server closed it,
+                // the network dropped). Closing the socket makes the read side notice it too;
+                // letting the exception escape would take down whichever coroutine sent it.
+                Log.d(TAG, "Could not send a command, closing the connection", e)
+                closeQuietly()
             }
+        }
+
+        fun closeQuietly() {
+            runCatching { close() }
         }
 
         override fun close() {
