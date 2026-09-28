@@ -184,6 +184,12 @@ can throw as well.
 - Suspicious: closing the connection on a write failure is a small behaviour change - a write error
   used to crash, now it drops the connection and the service reconnects. That is the same path a
   server-side close takes, so a reviewer should check that reconnect loop rather than the write.
+- Provenance (checked while answering "did we cause this?"): the crashing line is upstream's own -
+  `git blame` puts `SocketHolder.write` at `4badfe6d` (2025-03-02, Danny Baumann), long before any of
+  our work. No review-set branch touches `SlimprotoSocket.kt` at all (0 diff lines each), and the only
+  change main ever made to the file is `e45016e`'s MAC/player-id refactor, which is unrelated to the
+  write path. It is the same class of bug as the CometD crash of `fix/cometd-request-while-disconnected`
+  - an upstream socket call throwing into the coroutine that sent something.
 
 ## `fix/volume-device-volume-fades` (`557977b`, 3 files, +139)
 
