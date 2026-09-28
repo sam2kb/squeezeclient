@@ -19,6 +19,8 @@ package de.maniac103.squeezeclient.service.mediasession
 
 import android.content.Context
 import android.os.Looper
+import android.os.SystemClock
+import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.coroutineScope
@@ -32,14 +34,24 @@ import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import de.maniac103.squeezeclient.cometd.ConnectionHelper
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
+import de.maniac103.squeezeclient.extfuncs.lastPlaylistIndex
+import de.maniac103.squeezeclient.extfuncs.lastPlaylistPlayer
+import de.maniac103.squeezeclient.extfuncs.lastPlaylistPosition
+import de.maniac103.squeezeclient.extfuncs.lastPlaylistTimestamp
+import de.maniac103.squeezeclient.extfuncs.lastPlaylistUrls
+import de.maniac103.squeezeclient.extfuncs.lastPlaylistWasPlaying
+import de.maniac103.squeezeclient.extfuncs.localPlayerId
 import de.maniac103.squeezeclient.extfuncs.prefs
+import de.maniac103.squeezeclient.extfuncs.putLastPlaylist
 import de.maniac103.squeezeclient.extfuncs.volumeStepSize
 import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +80,12 @@ class SqueezeboxMediaPlayer(
         set(value) {
             if (field != value) {
                 field = value
+                if (value) {
+                    // A fresh connection may report the player without its playlist; the server
+                    // forgets a player that stays disconnected, and with it the playlist.
+                    lastConnectedTime = SystemClock.elapsedRealtime()
+                    startPlaylistLocationUpdates()
+                }
                 updatePlayer(currentPlayer)
                 launch {
                     if (!value) {
@@ -86,6 +104,18 @@ class SqueezeboxMediaPlayer(
     private var playlistFetchJob: Job? = null
     private var delayedStateUpdateJob: Job? = null
     private var unacknowledgedStateRevertJob: Job? = null
+
+    /** Whether the given player is the one built into the app. */
+    private fun isLocalPlayer(playerId: PlayerId) = playerId == appContext.prefs.localPlayerId
+
+    private var storedPlaylist: Playlist? = null
+    private var storedPlaylistUrls: List<String>? = null
+    private var playlistFetchAttempt: Playlist? = null
+    private var playlistLocationJob: Job? = null
+    private var latestStatus: PlayerStatus? = null
+    private var lastStatusReceivedAt = 0L
+    private var playlistRestoreAttempted = false
+    private var lastConnectedTime = 0L
 
     override fun handleSetDeviceVolume(deviceVolume: Int, flags: Int) = future {
         val playerId = currentPlayer ?: return@future
@@ -349,6 +379,8 @@ class SqueezeboxMediaPlayer(
             return
         }
 
+        rememberLatestStatus(status)
+
         if (status.playlist.lastChange != latestStatus?.playlist?.lastChange) {
             playlistFetchJob?.cancel()
             playlistFetchJob = lifecycle.coroutineScope.launch {
@@ -405,6 +437,142 @@ class SqueezeboxMediaPlayer(
         unacknowledgedStateChange = null
         unacknowledgedStateRevertJob?.cancel()
         invalidateState()
+        rememberPlaylist(newPlayerState)
+        restorePlaylistIfNeeded(newPlayerState)
+    }
+
+    /**
+     * Remembers the playlist of the built-in player, as one url per entry. A player that stays
+     * disconnected is forgotten by the server, and so is its playlist; without a copy of the urls
+     * nothing could be restored when the player comes back.
+     */
+    private fun rememberPlaylist(state: PlayerState) {
+        val playerId = currentPlayer ?: return
+        if (!isLocalPlayer(playerId)) {
+            return
+        }
+        val playlist = state.playlist ?: return
+        if (playlist.items.isEmpty()) {
+            return
+        }
+        if (playlist == storedPlaylist) {
+            // The queue is known; where we are inside it is followed by the location updates.
+            return
+        }
+        if (playlist == playlistFetchAttempt) {
+            return
+        }
+        playlistFetchAttempt = playlist
+        launch {
+            val urls = connectionHelper.fetchPlaylistUrls(playerId) ?: return@launch
+            storedPlaylist = playlist
+            storedPlaylistUrls = urls
+            storePlaylistLocation()
+        }
+    }
+
+    /** Takes note of a status, so the stored playback location can be kept up to date. */
+    private fun rememberLatestStatus(status: PlayerStatus) {
+        latestStatus = status
+        lastStatusReceivedAt = SystemClock.elapsedRealtime()
+        storePlaylistLocation()
+    }
+
+    /**
+     * Keeps the stored playback location current, so a queue that the server dropped can be
+     * restored where it stopped. The server only reports its position every fifteen seconds or so,
+     * which is why the location is also stored between status updates - see
+     * [startPlaylistLocationUpdates].
+     */
+    private fun storePlaylistLocation() {
+        val playerId = currentPlayer ?: return
+        if (!isLocalPlayer(playerId)) {
+            return
+        }
+        val urls = storedPlaylistUrls ?: return
+        val status = latestStatus ?: return
+        val index = (status.playlist.currentPosition - 1).coerceAtLeast(0)
+        val wasPlaying = status.playbackState == PlayerStatus.PlayState.Playing
+        val position = playbackPosition(status, wasPlaying) ?: return
+        appContext.prefs.edit {
+            putLastPlaylist(playerId, urls, index, position, wasPlaying)
+        }
+    }
+
+    /** Starts storing the playback location periodically while the server connection is up. */
+    private fun startPlaylistLocationUpdates() {
+        if (playlistLocationJob != null) {
+            return
+        }
+        playlistLocationJob = lifecycle.coroutineScope.launch {
+            while (true) {
+                delay(PLAYLIST_STORE_INTERVAL)
+                storePlaylistLocation()
+            }
+        }
+    }
+
+    /**
+     * The position playback is at as far as the app knows it: the player's own position while it
+     * plays the stream itself, the last reported one advanced by the time since, otherwise.
+     */
+    private fun playbackPosition(status: PlayerStatus, wasPlaying: Boolean): Int? {
+        val reported = status.currentPlayPosition ?: return null
+        if (!wasPlaying) {
+            return reported.inWholeSeconds.toInt()
+        }
+        val age = SystemClock.elapsedRealtime() - lastStatusReceivedAt
+        return ((reported.inWholeMilliseconds + age) / 1000).toInt()
+    }
+
+    /**
+     * Puts the remembered playlist back when the server dropped it: a player that stays
+     * disconnected for more than five minutes is forgotten by the server, and when it comes back
+     * its playlist is empty although the user did not clear it. Only done for the built-in
+     * player - the playlist of a player controlled from elsewhere may have been cleared on
+     * purpose.
+     */
+    private fun restorePlaylistIfNeeded(state: PlayerState) {
+        val playerId = currentPlayer ?: return
+        if (!isLocalPlayer(playerId) || playlistRestoreAttempted || !state.powered) {
+            return
+        }
+        if (state.playlistCount > 0) {
+            // The server still knows the playlist, so there is nothing to restore.
+            playlistRestoreAttempted = true
+            return
+        }
+        val prefs = appContext.prefs
+        val urls = prefs.lastPlaylistUrls
+        val recentlyConnected = lastConnectedTime == 0L ||
+            SystemClock.elapsedRealtime() - lastConnectedTime <
+            PLAYLIST_RESTORE_WINDOW.inWholeMilliseconds
+        val playlistAge = System.currentTimeMillis() - prefs.lastPlaylistTimestamp
+        playlistRestoreAttempted = true
+        if (!recentlyConnected || urls.isEmpty() || prefs.lastPlaylistPlayer != playerId ||
+            playlistAge > PLAYLIST_MAX_AGE.inWholeMilliseconds
+        ) {
+            return
+        }
+        val index = prefs.lastPlaylistIndex.coerceIn(0, urls.size - 1)
+        val position = prefs.lastPlaylistPosition
+        val wasPlaying = prefs.lastPlaylistWasPlaying
+        launch {
+            connectionHelper.restorePlaylist(playerId, urls)
+            if (index > 0) {
+                // Move the rebuilt queue back to the entry it stopped at, without starting it.
+                connectionHelper.setPlaylistPosition(playerId, index)
+            }
+            if (wasPlaying) {
+                connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Playing)
+                if (position > 0) {
+                    delay(PLAYLIST_SEEK_DELAY)
+                }
+            }
+            if (position > 0) {
+                connectionHelper.updatePlaybackPosition(playerId, position)
+            }
+        }
     }
 
     private fun Playlist.PlaylistItem.toMediaItemDataBuilder(position: Int): MediaItemData.Builder {
@@ -439,6 +607,7 @@ class SqueezeboxMediaPlayer(
         val currentSongDuration get() = status.currentSongDuration
         val currentPlayPosition get() = status.currentPlayPosition
         val playlistPosition get() = status.playlist.currentPosition - 1
+        val playlistCount get() = status.playlist.trackCount
         val playbackState get() = status.playbackState
         val powered get() = status.powered
         val muted get() = status.muted
@@ -453,4 +622,19 @@ class SqueezeboxMediaPlayer(
         val positionInTrack: Duration? = null,
         val playState: PlayerStatus.PlayState? = null
     )
+    companion object {
+        // Time after (re)connecting during which an empty playlist is taken as "the server
+        // forgot the player" and the remembered playlist is put back.
+        private val PLAYLIST_RESTORE_WINDOW = 2.minutes
+
+        // Time a remembered playlist is considered worth restoring.
+        private val PLAYLIST_MAX_AGE = 12.hours
+
+        // Minimum time between two stored playback locations of the same queue.
+        private val PLAYLIST_STORE_INTERVAL = 15.seconds
+
+        // Time to wait after starting playback before seeking to the remembered position; the
+        // seek needs a running stream to apply to.
+        private val PLAYLIST_SEEK_DELAY = 2.seconds
+    }
 }

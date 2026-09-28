@@ -27,6 +27,7 @@ import android.view.View
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.constraintlayout.widget.ConstraintSet
+import androidx.core.content.edit
 import androidx.core.graphics.Insets
 import androidx.core.view.MenuProvider
 import androidx.core.view.ViewCompat
@@ -45,11 +46,13 @@ import de.maniac103.squeezeclient.R
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.databinding.FragmentNowplayingBinding
 import de.maniac103.squeezeclient.extfuncs.backProgressInterpolator
+import de.maniac103.squeezeclient.extfuncs.clearLastPlaylist
 import de.maniac103.squeezeclient.extfuncs.connectionHelper
 import de.maniac103.squeezeclient.extfuncs.doOnTransitionCompleted
 import de.maniac103.squeezeclient.extfuncs.getParcelable
 import de.maniac103.squeezeclient.extfuncs.isRtl
 import de.maniac103.squeezeclient.extfuncs.loadArtwork
+import de.maniac103.squeezeclient.extfuncs.prefs
 import de.maniac103.squeezeclient.extfuncs.requireParentAs
 import de.maniac103.squeezeclient.model.JiveAction
 import de.maniac103.squeezeclient.model.PagingParams
@@ -341,6 +344,9 @@ class NowPlayingFragment :
         R.id.clear_playlist -> {
             lifecycleScope.launch {
                 connectionHelper.clearCurrentPlaylist(playerId)
+                // Clearing is deliberate; a playlist the user threw away must not come back
+                // when the app restores the last session.
+                prefs.edit { clearLastPlaylist() }
             }
             true
         }
