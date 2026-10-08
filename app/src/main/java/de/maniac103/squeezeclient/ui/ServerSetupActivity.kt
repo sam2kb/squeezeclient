@@ -82,11 +82,14 @@ class ServerSetupActivity : AppCompatActivity() {
         binding.serverAddress.doAfterTextChanged { validateInput() }
         binding.username.doAfterTextChanged { validateInput() }
         binding.password.doAfterTextChanged { validateInput() }
+        validateInput()
 
         binding.connectButton.setOnClickListener {
             prefs.edit {
                 val address = binding.serverAddress.text?.toString()
-                    ?: return@edit
+                if (address.isNullOrBlank()) {
+                    return@edit
+                }
                 val serverName = binding.discoveredServers.text
                     ?.let {
                         val name = it.toString()

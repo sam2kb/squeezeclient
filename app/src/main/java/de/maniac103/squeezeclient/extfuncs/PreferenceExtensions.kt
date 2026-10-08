@@ -32,7 +32,9 @@ val SharedPreferences.forceGridLayout get() =
 val SharedPreferences.serverConfig: ServerConfiguration? get() {
     val name = getString("server_name", null)
     val hostnameAndPort = getString("server_url", null)
-    return if (name != null && hostnameAndPort != null) {
+    // Treat a saved but empty address as no configuration at all; ServerConfiguration.url would
+    // throw for it, and the app would crash on every connect attempt.
+    return if (name != null && !hostnameAndPort.isNullOrBlank()) {
         ServerConfiguration(
             name,
             hostnameAndPort,
