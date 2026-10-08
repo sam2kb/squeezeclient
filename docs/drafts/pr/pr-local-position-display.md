@@ -70,12 +70,12 @@ transitions directly; the media-session report stays the fallback for transition
 Diff: 5 files, +113 / -10 (`service/localplayer/LocalPlayerPosition.kt` (new),
 `service/localplayer/LocalPlaybackService.kt`, `service/localplayer/LocalPlayer.kt`,
 `service/mediasession/SqueezeboxMediaPlayer.kt`, `ui/nowplaying/NowPlayingFragment.kt`).
-Branch: `fix/local-position-display` (`775f164`, off `upstream/main` `4c4c526`), pushed to the fork
+Branch: `fix/local-position-display` (`87edae1`, off `upstream/main` `51eb708`), pushed to the fork
 (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`775f164`) on top of upstream `4c4c526`; it builds and lints on its own (see
+One commit (`87edae1`) on top of upstream `51eb708`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`).
 
 This is the oldest of the four drafts that touch position handling, and the four that were written

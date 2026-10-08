@@ -70,12 +70,12 @@ lifecycle scope without a handler, so the process died there instead of dropping
 commands nobody waits for now go through one `publishCommand` helper that logs and drops them;
 requests whose result is used (favourites, playlist fetches) keep the failure.
 
-Branch: `fix/cometd-request-while-disconnected` (`f9d8a49`, off `upstream/main` `4c4c526`), pushed
+Branch: `fix/cometd-request-while-disconnected` (`fbd168c`, off `upstream/main` `51eb708`), pushed
 to the fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`f9d8a49`) on top of upstream `4c4c526`; it builds and lints on its own (see
+One commit (`fbd168c`) on top of upstream `51eb708`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). With the command helper it now works in the same
 `cometd/ConnectionHelper.kt` regions as `feature/nowplaying-favorite-toggle` and
 `fix/position-after-disconnect`, so it conflicts with both in small hunks. The favourites

@@ -32,12 +32,12 @@ that was still in flight flipped it back first.
 - while the connection is down, do not send the press at all and tell the user instead.
 
 Diff: one file, +59 / -7 (`ui/nowplaying/NowPlayingFragment.kt`).
-Branch: `fix/nowplaying-play-pause-response` (`98d42c1`, off `upstream/main` `4c4c526`), pushed to
+Branch: `fix/nowplaying-play-pause-response` (`e499887`, off `upstream/main` `51eb708`), pushed to
 the fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`98d42c1`) on top of upstream `4c4c526`; it builds and lints on its own (see
+One commit (`e499887`) on top of upstream `51eb708`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). It conflicts with `fix/local-position-display` and `fix/slider-drag`
 in `ui/nowplaying/NowPlayingFragment.kt` - all three add lines in the same two places (the field
 block and the state binding).

@@ -56,7 +56,7 @@ in `Slider` when the song changes while the slider is out of its range.
 
 Diff: one file, +95 / -5 (`ui/nowplaying/NowPlayingFragment.kt`); only *when* positions are
 applied to the slider changes, nothing about how they are fetched or sent.
-Branch: `fix/slider-drag` (`ae79fcb`, off `upstream/main` `4c4c526`), pushed to the fork (`origin`),
+Branch: `fix/slider-drag` (`bdaccac`, off `upstream/main` `51eb708`), pushed to the fork (`origin`),
 not to upstream.
 
 ## Follow-up case: a seek that outlives its song (2026-09-22)
@@ -73,7 +73,7 @@ Fix: remember the song a seek was made in and forget the seek when another song 
 
 ## For the reviewer
 
-The branch is a single commit (`ae79fcb`, the follow-up case included) on top of upstream `4c4c526`;
+The branch is a single commit (`bdaccac`, the follow-up case included) on top of upstream `51eb708`;
 it builds and lints on its own (see `docs/drafts/check-report.txt`). It conflicts with
 `fix/local-position-display` in `ui/nowplaying/NowPlayingFragment.kt` (one small hunk - both drafts
 edit where positions are applied to the slider, that one is the older of the two).

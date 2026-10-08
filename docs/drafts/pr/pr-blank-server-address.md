@@ -56,11 +56,11 @@ connection instead. The service is restarted after the crash, connects again and
 configuration, so the app falls back to the setup screen instead of retrying, and do not let the
 setup screen save an address that the validation rejects (the button should start out disabled).
 Two files, +7/-2 (`extfuncs/PreferenceExtensions.kt`, `ui/ServerSetupActivity.kt`).
-Branch: `fix/blank-server-address` (`54dd286`, off `upstream/main` `4c4c526`), not pushed yet.
+Branch: `fix/blank-server-address` (`38f6791`, off `upstream/main` `51eb708`), not pushed yet.
 
 ## For the reviewer
 
-One commit (`54dd286`) on top of upstream `4c4c526`; it builds and lints on its own.
+One commit (`38f6791`) on top of upstream `51eb708`; it builds and lints on its own.
 
 - The crash itself is `okhttp`'s way of saying "this URL has no host"; the fix does not touch it, it
   only makes sure the app never gets there: an empty address is handled like an unconfigured app (a

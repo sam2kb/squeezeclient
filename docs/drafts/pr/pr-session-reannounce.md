@@ -63,11 +63,11 @@ unit reads (media3 `addSession`/`removeSession` only mutate the session map, the
 listener), and the log line quoted below comes from a different commit. Kept as a record, not for
 upstream.
 
-Branch: `fix/session-reannounce` (`0672547`, off `upstream/main` `4c4c526`), pushed to the fork
+Branch: `fix/session-reannounce` (`db8ff93`, off `upstream/main` `51eb708`), pushed to the fork
 (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`0672547`) on top of upstream `4c4c526`; it builds and lints on its own (see
+One commit (`db8ff93`) on top of upstream `51eb708`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). It does not conflict with any other draft - but see the note above
 about it being written against the older media session code.

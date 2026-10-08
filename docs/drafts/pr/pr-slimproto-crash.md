@@ -51,12 +51,12 @@ playing) leave the process alive and playback continues; the write failure is lo
 `SocketHolder.write`, log it, and close the socket quietly so the read side tears the connection
 down (`teardownSocket` closes the same way now - closing a broken socket can throw as well). One
 file, +16/-4 (`service/localplayer/SlimprotoSocket.kt`).
-Branch: `fix/slimproto-write-crash` (`9539e12`, off `upstream/main` `4c4c526`), pushed to the fork
+Branch: `fix/slimproto-write-crash` (`bf3fc45`, off `upstream/main` `51eb708`), pushed to the fork
 (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`9539e12`) on top of upstream `4c4c526`; it builds and lints on its own (see
+One commit (`bf3fc45`) on top of upstream `51eb708`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). The failure is hard to reproduce on demand - whether a write
 actually fails depends on the local network stack aborting the connection - so the verification is
 the negative one: with the change no `IOException` can escape that path any more (the write is the

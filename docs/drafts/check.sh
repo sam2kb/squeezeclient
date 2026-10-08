@@ -11,7 +11,7 @@
 # Usage: bash docs/drafts/check.sh [branch ...]      (default: all reviewable fix/* and feature/*)
 #
 # Environment (all optional):
-#   UPSTREAM     commit every draft sits on          (default 4c4c526, upstream 2.5)
+#   UPSTREAM     commit every draft sits on          (default 51eb708, the commit after upstream 2.5)
 #   SKIP         branches to leave out               (default: the obsolete ones, see README)
 #   GRADLE_CMD   compile command, run in the worktree (default: ./gradlew, or gradlew.bat from WSL)
 #   KTLINT       ktlint binary                       (default /tmp/ktlint-1.8.0/.../bin/ktlint)
@@ -22,7 +22,7 @@ set -u
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 cd "$HERE/../.." || exit 1
-UPSTREAM=${UPSTREAM:-4c4c526}
+UPSTREAM=${UPSTREAM:-51eb708}
 WORKDIR=${WORKDIR:-/mnt/d/repos/squeezeclient-drafts}
 SCRATCH=${SCRATCH:-$WORKDIR/scratch}
 LOGDIR=${LOGDIR:-/tmp/drafts-check}

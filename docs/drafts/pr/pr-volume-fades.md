@@ -38,12 +38,12 @@ steps, and a stream restart after a network blip set it to the server's mixer vo
 
 Diff: 3 files, +139 (`service/localplayer/LocalPlayer.kt`, `service/localplayer/LocalPlayerVolume.kt`
 (new), `service/mediasession/SqueezeboxMediaPlayer.kt`).
-Branch: `fix/volume-device-volume-fades` (`557977b`, off `upstream/main` `4c4c526`), pushed to the
+Branch: `fix/volume-device-volume-fades` (`e2e1064`, off `upstream/main` `51eb708`), pushed to the
 fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`557977b`) on top of upstream `4c4c526`; it builds and lints on its own (see
+One commit (`e2e1064`) on top of upstream `51eb708`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). Two drafts conflict with it in
 `service/mediasession/SqueezeboxMediaPlayer.kt`, one small hunk each: `fix/local-position-display`
 (both add to the state that is published) and `fix/position-after-disconnect` (its seek handlers sit

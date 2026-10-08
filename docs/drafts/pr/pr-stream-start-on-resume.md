@@ -175,12 +175,12 @@ readers upstream ships for FLAC (`FlacMetadataCachingDataReader.kt`, which this 
 removed, and `LocalPlayer.kt`, `LocalPlaybackService.kt` and `LocalPlayerMediaExtractor.kt` are
 adapted.
 
-It was not split into a branch because it does not stand alone on upstream `4c4c526`: it uses the
+It was not split into a branch because it does not stand alone on upstream `51eb708`: it uses the
 current-track-info request that the favourite toggle draft adds, so a cherry-pick conflicts in
 `CurrentTrackInfoRequest.kt` and `CurrentTrackInfoResponse.kt` as well as in the three files above,
 and porting it means re-adapting the hooks in `LocalPlayer`/`LocalPlaybackService` by hand (the same
 kind of port `fix/position-after-disconnect` needed). The other drafts are all single commits on
-top of `4c4c526` and can be reviewed branch by branch.
+top of `51eb708` and can be reviewed branch by branch.
 
 Verification: on device with a FLAC library (capture, store, and a resuming stream using the stored
 start - 4 unit tests for FLAC and 4 for Ogg cover the reader itself). Ogg was unit tested only, the

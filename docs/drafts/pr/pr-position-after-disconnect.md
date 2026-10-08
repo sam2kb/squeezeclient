@@ -112,12 +112,12 @@ was untouched.
 Diff: 5 files, +275 / -5 (`service/localplayer/LocalPlaybackService.kt`,
 `service/localplayer/LocalPlayer.kt`, `cometd/ConnectionHelper.kt`,
 `service/localplayer/PositionChangeRequests.kt` (new)).
-Branch: `fix/position-after-disconnect` (`a984d7b`, off `upstream/main` `4c4c526`), pushed to the
+Branch: `fix/position-after-disconnect` (`4b26c65`, off `upstream/main` `51eb708`), pushed to the
 fork (`origin`), not to upstream.
 
 ## For the reviewer
 
-One commit (`a984d7b`) on top of upstream `4c4c526`; it builds and lints on its own (see
+One commit (`4b26c65`) on top of upstream `51eb708`; it builds and lints on its own (see
 `docs/drafts/check-report.txt`). It carries both this change and the position-after-seek fix
 (`build/pr-position-after-seek.md`), because that one was written on top of `PositionChangeRequests`
 and the same service code - the two belong in one PR anyway, they have no meaning apart.
