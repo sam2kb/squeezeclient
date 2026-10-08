@@ -1,4 +1,4 @@
-== draft check 2026-09-28T18:28:57-04:00, upstream 4c4c526 ==
+== draft check 2026-10-08T10:14:23-04:00, upstream 51eb708 ==
    gradle: cmd.exe /c "cd /d D:\repos\squeezeclient-drafts\scratch && gradlew.bat --quiet :app:compileFossDebugKotlin"
 --- feature/local-player-restore-playlist
     base: 0 behind / 1 ahead of upstream; diff: +322/-0 files=7
@@ -6,6 +6,10 @@
     compile: OK
 --- feature/nowplaying-favorite-toggle
     base: 0 behind / 1 ahead of upstream; diff: +437/-13 files=14
+    ktlint: upstream's pre-existing hits only
+    compile: OK
+--- fix/blank-server-address
+    base: 0 behind / 1 ahead of upstream; diff: +7/-2 files=2
     ktlint: upstream's pre-existing hits only
     compile: OK
 --- fix/cometd-request-while-disconnected
