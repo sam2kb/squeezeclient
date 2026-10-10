@@ -36,18 +36,22 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ServiceLifecycleDispatcher
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.work.Constraints
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import de.maniac103.squeezeclient.R
+import de.maniac103.squeezeclient.cometd.CometdClient
+import de.maniac103.squeezeclient.extfuncs.connectionHelper
 import de.maniac103.squeezeclient.extfuncs.getOrCreateNotificationChannel
 import de.maniac103.squeezeclient.extfuncs.localPlayerEnabled
 import de.maniac103.squeezeclient.extfuncs.localPlayerName
 import de.maniac103.squeezeclient.extfuncs.prefs
 import de.maniac103.squeezeclient.extfuncs.putLocalPlayerName
 import de.maniac103.squeezeclient.extfuncs.workManager
+import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.service.NotificationIds
 import de.maniac103.squeezeclient.service.mediasession.MediaService
 import de.maniac103.squeezeclient.ui.MainActivity
@@ -57,6 +61,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 import kotlin.time.ExperimentalTime
 import kotlin.time.toDuration
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.GlobalScope
@@ -99,7 +104,7 @@ class LocalPlaybackService :
             onPlaybackAdvancedToNextTrack = { onPlaybackAdvancedToNextTrack() },
             onPlaybackEnded = { streamEnded -> onPlaybackEnded(streamEnded) },
             onPlaybackError = { onPlaybackError() },
-            onPauseStateChanged = { paused -> onPauseStateChanged(paused) },
+            onPauseStateChanged = { paused, reason -> onPauseStateChanged(paused, reason) },
             onAudioStreamFlushed = { onAudioStreamFlushed() },
             onDecoderLoadFinished = { onDecoderLoadFinished() },
             onDecodingFinished = { onDecodingFinished() },
@@ -190,12 +195,26 @@ class LocalPlaybackService :
         sentTrackStartStatus = true
     }
 
-    private fun onPauseStateChanged(paused: Boolean) = lifecycleScope.launch {
+    private fun onPauseStateChanged(paused: Boolean, reason: Int) = lifecycleScope.launch {
         slimprotoStateFlow.emit(
             SlimprotoState.PlayingOrPaused(player.playingTitle, paused)
         )
         if (!paused) {
             handlePlaybackStart()
+        }
+        if (paused && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) {
+            try {
+                connectionHelper.changePlaybackState(
+                    slimproto.playerId,
+                    PlayerStatus.PlayState.Paused
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: CometdClient.CometdException) {
+                Log.d(TAG, "Could not pause after audio focus loss", e)
+            } catch (e: IllegalStateException) {
+                Log.d(TAG, "Could not pause after audio focus loss", e)
+            }
         }
     }
 
@@ -339,9 +358,9 @@ class LocalPlaybackService :
             bufferSize
         )
 
-        // Make sure we send an update at least once per second while playing
+        // Keep reporting while playback is requested, including temporary audio focus loss.
         statusUpdateJob?.cancel()
-        if (player.isPlaying) {
+        if (player.readyForPlayback && !player.paused) {
             statusUpdateJob = lifecycleScope.launch {
                 delay(1.seconds)
                 sendStatus(SlimprotoSocket.StatusType.Timer(0))

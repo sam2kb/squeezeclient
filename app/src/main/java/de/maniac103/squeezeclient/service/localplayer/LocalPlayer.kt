@@ -22,6 +22,7 @@ import android.media.AudioTimestamp
 import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
@@ -63,7 +64,7 @@ class LocalPlayer(
     context: Context,
     private val onPlaybackReady: (buffering: Boolean) -> Unit = {},
     private val onPlaybackAdvancedToNextTrack: () -> Unit = {},
-    private val onPauseStateChanged: (paused: Boolean) -> Unit = {},
+    private val onPauseStateChanged: (paused: Boolean, reason: Int) -> Unit = { _, _ -> },
     private val onPlaybackEnded: (streamEnded: Boolean) -> Unit = {},
     private val onPlaybackError: () -> Unit = {},
     private val onDecoderLoadFinished: () -> Unit = {},
@@ -96,7 +97,7 @@ class LocalPlayer(
     val readyForPlaybackOrBuffering get() =
         player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING
     val readyForPlayback get() = player.playbackState == Player.STATE_READY
-    val isPlaying get() = player.playbackState == Player.STATE_READY && player.playWhenReady
+    val isPlaying get() = player.isPlaying
 
     var volume: Float
         get() = lastSetVolume ?: 0F
@@ -154,6 +155,7 @@ class LocalPlayer(
             )
             .build()
         val player = ExoPlayer.Builder(context)
+            .setAudioAttributes(AudioAttributes.DEFAULT, true)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .setRenderersFactory(AudioSinkOverridingFactory(context))
             .setLoadControl(loadControl)
@@ -306,8 +308,8 @@ class LocalPlayer(
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         super.onPlayWhenReadyChanged(playWhenReady, reason)
-        if (readyForPlayback) {
-            onPauseStateChanged(!playWhenReady)
+        if (readyForPlayback || reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) {
+            onPauseStateChanged(!playWhenReady, reason)
         }
         updatePlayerVolume(false)
     }
