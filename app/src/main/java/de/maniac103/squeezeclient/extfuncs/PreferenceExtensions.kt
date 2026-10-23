@@ -87,7 +87,7 @@ enum class LocalPlayerVolumeMode(val prefValue: String) {
 val SharedPreferences.localPlayerVolumeMode: LocalPlayerVolumeMode get() {
     val value = getString(
         "local_player_volume_mode",
-        LocalPlayerVolumeMode.DeviceWhilePlaying.prefValue
+        LocalPlayerVolumeMode.PlayerOnly.prefValue
     )
     return LocalPlayerVolumeMode.entries.find { value == it.prefValue }
         ?: throw IllegalStateException("Local player volume mode value $value has no mapping")
