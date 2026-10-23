@@ -28,6 +28,7 @@ import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorInput
 import androidx.media3.extractor.ExtractorOutput
 import androidx.media3.extractor.PositionHolder
+import androidx.media3.extractor.TrackOutput
 import androidx.media3.extractor.flac.FlacExtractor
 import androidx.media3.extractor.mp3.Mp3Extractor
 import androidx.media3.extractor.ogg.OggExtractor
@@ -37,12 +38,12 @@ import kotlin.collections.emptyList
 @UnstableApi
 class LocalPlayerMediaExtractor(
     private val mimeType: String,
-    private val streamStartCache: StreamStartCache,
-    private val onStreamStartNeeded: () -> Boolean = { false },
-    private val onStreamStartCaptured: (ByteArray, Double?) -> Unit = { _, _ -> }
+    private val flacMetadataCache: FlacMetadataCache,
+    private val onSampleTimestamp: (Long) -> Unit = {}
 ) : ProgressiveMediaExtractor {
     private var extractor: Extractor? = null
     private var extractorInput: ExtractorInput? = null
+    private var isFlacServerStream = false
 
     override fun init(
         dataReader: DataReader,
@@ -67,16 +68,35 @@ class LocalPlayerMediaExtractor(
                 emptyList()
             )
         }
-        val actualDataReader = streamContainer(uri)?.let { container ->
-            StreamPrefixCachingDataReader(
-                dataReader,
-                container,
-                streamStartCache,
-                onStreamStartNeeded,
-                onStreamStartCaptured
-            )
-        } ?: dataReader
-        extractor.init(output)
+        isFlacServerStream = uri.path == "/stream.mp3" && mimeType == "audio/flac"
+        val actualDataReader = if (isFlacServerStream) {
+            FlacMetadataCachingDataReader(dataReader, flacMetadataCache)
+        } else {
+            dataReader
+        }
+        val actualOutput = if (mimeType == "audio/flac") {
+            object : ExtractorOutput by output {
+                override fun track(id: Int, type: Int): TrackOutput {
+                    val track = output.track(id, type)
+                    return object : TrackOutput by track {
+                        override fun sampleMetadata(
+                            timeUs: Long,
+                            flags: Int,
+                            size: Int,
+                            offset: Int,
+                            cryptoData: TrackOutput.CryptoData?
+                        ) {
+                            onSampleTimestamp(timeUs)
+                            track.sampleMetadata(timeUs, flags, size, offset, cryptoData)
+                        }
+                    }
+                }
+            }
+        } else {
+            output
+        }
+        extractor.init(actualOutput)
+        if (isFlacServerStream) extractor.seek(0, C.TIME_UNSET)
         this.extractor = extractor
         this.extractorInput = DefaultExtractorInput(actualDataReader, position, length)
     }
@@ -87,22 +107,6 @@ class LocalPlayerMediaExtractor(
         extractorInput = null
     }
 
-    /**
-     * The container of the stream [uri] points to, as far as the player needs to know about it;
-     * null when streams of that container can start anywhere. Files the player plays on its own
-     * are seekable, so only the server's streaming endpoint needs its start replayed.
-     */
-    private fun streamContainer(uri: Uri): StreamContainer? {
-        if (uri.path != STREAMING_ENDPOINT_PATH) {
-            return null
-        }
-        return when (mimeType) {
-            "audio/flac" -> FlacStreamContainer
-            "audio/ogg" -> OggStreamContainer
-            else -> null
-        }
-    }
-
     override fun disableSeekingOnMp3Streams() {
         val underlying = extractor?.underlyingImplementation
         (underlying as? Mp3Extractor)?.disableSeeking()
@@ -111,16 +115,17 @@ class LocalPlayerMediaExtractor(
     override fun getCurrentInputPosition() = extractorInput?.position ?: C.INDEX_UNSET.toLong()
 
     override fun seek(position: Long, seekTimeUs: Long) {
-        extractor?.seek(position, seekTimeUs)
+        // Injected FLAC headers describe the full song; the first frame may be after a seek.
+        // TIME_UNSET makes FlacExtractor read that frame's sample number instead of assuming zero.
+        if (isFlacServerStream && seekTimeUs == 0L) {
+            extractor?.seek(0, C.TIME_UNSET)
+        } else {
+            extractor?.seek(position, seekTimeUs)
+        }
     }
 
     override fun read(positionHolder: PositionHolder): Int {
         val input = requireNotNull(extractorInput)
         return requireNotNull(extractor).read(input, positionHolder)
-    }
-
-    private companion object {
-        /** The path of the endpoint the server streams files from. */
-        private const val STREAMING_ENDPOINT_PATH = "/stream.mp3"
     }
 }

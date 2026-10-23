@@ -19,8 +19,6 @@ package de.maniac103.squeezeclient.service.mediasession
 
 import android.content.Context
 import android.os.Looper
-import android.os.SystemClock
-import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.coroutineScope
@@ -32,37 +30,17 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
-import de.maniac103.squeezeclient.Diag
 import de.maniac103.squeezeclient.cometd.ConnectionHelper
 import de.maniac103.squeezeclient.cometd.ConnectionState
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
-import de.maniac103.squeezeclient.extfuncs.lastPlaylistIndex
-import de.maniac103.squeezeclient.extfuncs.lastPlaylistPlayer
-import de.maniac103.squeezeclient.extfuncs.lastPlaylistPosition
-import de.maniac103.squeezeclient.extfuncs.lastPlaylistTimestamp
-import de.maniac103.squeezeclient.extfuncs.lastPlaylistUrls
-import de.maniac103.squeezeclient.extfuncs.lastPlaylistWasPlaying
-import de.maniac103.squeezeclient.extfuncs.lastSessionPlayer
-import de.maniac103.squeezeclient.extfuncs.lastSessionPosition
-import de.maniac103.squeezeclient.extfuncs.lastSessionTimestamp
-import de.maniac103.squeezeclient.extfuncs.lastSessionWasPlaying
-import de.maniac103.squeezeclient.extfuncs.localPlayerId
 import de.maniac103.squeezeclient.extfuncs.prefs
-import de.maniac103.squeezeclient.extfuncs.putLastPlaylist
-import de.maniac103.squeezeclient.extfuncs.putLastSession
-import de.maniac103.squeezeclient.extfuncs.resumePlayback
 import de.maniac103.squeezeclient.extfuncs.volumeStepSize
 import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
-import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
-import de.maniac103.squeezeclient.service.localplayer.LocalPlayerVolume
-import de.maniac103.squeezeclient.service.localplayer.PositionChangeRequests
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 import kotlinx.coroutines.CoroutineScope
@@ -84,23 +62,20 @@ class SqueezeboxMediaPlayer(
         set(value) {
             if (field != value) {
                 field = value
-                // A new player gets a fresh chance to continue its last session; connection
-                // blips for the same player don't (see resumeLastSession).
-                resumeAttempted = false
+                clearUnacknowledgedState()
+                playlistFetchJob?.cancel()
+                delayedStateUpdateJob?.cancel()
+                pendingPlayerState = PendingPlayerState()
+                playerState = null
                 updatePlayer(value)
+                invalidateState()
             }
         }
     var isConnectedToServer: Boolean = true
         set(value) {
             if (field != value) {
                 field = value
-                Diag.log("player", "isConnectedToServer=$value")
-                if (value) {
-                    // A fresh connection may report the player without its playlist; the server
-                    // forgets a player that stays disconnected, and with it the playlist.
-                    lastConnectedTime = SystemClock.elapsedRealtime()
-                    startPlaylistLocationUpdates()
-                }
+                if (!value) clearUnacknowledgedState()
                 updatePlayer(currentPlayer)
                 launch {
                     if (!value) {
@@ -114,26 +89,11 @@ class SqueezeboxMediaPlayer(
         }
     private var pendingPlayerState = PendingPlayerState()
     private var playerState: PlayerState? = null
-    private var unacknowledgedStateChange: UnacknowledgedPlayerStateChange? = null
+    private var unacknowledgedStateChange: PendingPlayerCommands? = null
     private var statusSubscription: Job? = null
     private var playlistFetchJob: Job? = null
     private var delayedStateUpdateJob: Job? = null
     private var unacknowledgedStateRevertJob: Job? = null
-
-    /** Whether the given player is the one built into the app. */
-    private fun isLocalPlayer(playerId: PlayerId) = playerId == appContext.prefs.localPlayerId
-
-    private var statusSubscriptionStartTime = 0L
-    private var resumeAttempted = false
-    private var lastSessionStore = 0L
-    private var storedPlaylist: Playlist? = null
-    private var storedPlaylistUrls: List<String>? = null
-    private var playlistFetchAttempt: Playlist? = null
-    private var playlistLocationJob: Job? = null
-    private var latestStatus: PlayerStatus? = null
-    private var lastStatusReceivedAt = 0L
-    private var playlistRestoreAttempted = false
-    private var lastConnectedTime = 0L
 
     override fun handleSetDeviceVolume(deviceVolume: Int, flags: Int) = future {
         val playerId = currentPlayer ?: return@future
@@ -160,8 +120,8 @@ class SqueezeboxMediaPlayer(
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean) = future {
-        Diag.log("cmd", "setPlayWhenReady($playWhenReady)")
         val playerId = currentPlayer ?: return@future
+        if (connectionHelper.state.value !is ConnectionState.Connected) return@future
         val newState = when {
             playWhenReady -> PlayerStatus.PlayState.Playing
             else -> PlayerStatus.PlayState.Paused
@@ -170,30 +130,23 @@ class SqueezeboxMediaPlayer(
         connectionHelper.changePlaybackState(playerId, newState)
     }
 
-    private fun isConnected() = connectionHelper.state.value is ConnectionState.Connected
-
     override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int) = future {
-        Diag.log("cmd", "seek cmd=$seekCommand index=$mediaItemIndex posMs=$positionMs")
         val playerId = currentPlayer ?: return@future
-        // A seek cannot succeed while the connection is down; bail out instead of making
-        // the media session walk through the playlist on its own.
-        if (!isConnected()) return@future
+        if (connectionHelper.state.value !is ConnectionState.Connected) return@future
         when (seekCommand) {
             COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, COMMAND_SEEK_TO_NEXT -> {
-                PositionChangeRequests.note()
-                updateUnacknowledgedState(
-                    playlistPositionOffset = 1,
-                    song = songAtOffset(1)
-                )
+                updateUnacknowledgedState(playlistPositionOffset = 1)
                 connectionHelper.sendButtonRequest(PlaybackButtonRequest.NextTrack(playerId))
             }
 
             COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM, COMMAND_SEEK_TO_PREVIOUS -> {
-                PositionChangeRequests.note()
-                updateUnacknowledgedState(
-                    playlistPositionOffset = -1,
-                    song = songAtOffset(-1)
-                )
+                val state = playerState
+                val position = unacknowledgedStateChange?.positionInTrack
+                    ?: state?.currentPlayPosition
+                val playState = unacknowledgedStateChange?.playState ?: state?.playbackState
+                val restart = playState != PlayerStatus.PlayState.Stopped &&
+                    position != null && position >= 5.seconds
+                updateUnacknowledgedState(playlistPositionOffset = if (restart) 0 else -1)
                 connectionHelper.sendButtonRequest(
                     PlaybackButtonRequest.PreviousTrack(playerId)
                 )
@@ -207,11 +160,12 @@ class SqueezeboxMediaPlayer(
 
             COMMAND_SEEK_TO_MEDIA_ITEM -> {
                 val positionSeconds = ((positionMs + 500) / 1000).toInt()
+                val playlistPosition = mediaItemIndex + (playerState?.playlist?.offset ?: 0)
                 updateUnacknowledgedState(
-                    absolutePlaylistPosition = mediaItemIndex,
+                    absolutePlaylistPosition = playlistPosition,
                     positionInTrack = positionMs.milliseconds
                 )
-                connectionHelper.advanceToPlaylistPosition(playerId, mediaItemIndex)
+                connectionHelper.advanceToPlaylistPosition(playerId, playlistPosition)
                 if (positionSeconds > 0) {
                     connectionHelper.updatePlaybackPosition(playerId, positionSeconds)
                 }
@@ -222,39 +176,38 @@ class SqueezeboxMediaPlayer(
     }
 
     override fun handleStop() = future {
-        Diag.log("cmd", "stop")
         val playerId = currentPlayer ?: return@future
+        if (connectionHelper.state.value !is ConnectionState.Connected) return@future
         updateUnacknowledgedState(playState = PlayerStatus.PlayState.Stopped)
         connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Stopped)
     }
 
+    override fun getPlaceholderState(suggestedPlaceholderState: State) =
+        if (unacknowledgedStateChange != null) {
+            getState().buildUpon()
+                .setDeviceVolume(suggestedPlaceholderState.deviceVolume)
+                .setIsDeviceMuted(suggestedPlaceholderState.isDeviceMuted)
+                .build()
+        } else {
+            suggestedPlaceholderState
+        }
+
     override fun getState(): State {
         val playerState = playerState
             ?: return waitingForPlayerState()
-        val currentSong = unacknowledgedStateChange?.song ?: playerState.currentSong
+        val currentSong = playerState.currentSong
             ?: return State.Builder().setPlaybackState(STATE_IDLE).build()
         val unacknowledgedChange = unacknowledgedStateChange
 
         val currentSongDurationUs =
             playerState.currentSongDuration?.toLong(DurationUnit.MICROSECONDS)
-        // An empty playlist has no item to point at; the song alone is what the session reports
-        // then (and the clamp below would not have a valid range anyway).
-        val playlistInfo = playerState.playlist?.takeIf { it.items.isNotEmpty() }
-        val (playlist, currentIndex) = playlistInfo?.let { list ->
-            val currentPosition = when {
-                unacknowledgedChange?.absolutePlaylistPosition != null ->
-                    unacknowledgedChange.absolutePlaylistPosition
-
-                unacknowledgedChange?.playlistPositionOffset != null ->
-                    playerState.playlistPosition + unacknowledgedChange.playlistPositionOffset
-
-                else -> playerState.playlistPosition
-            }
-            // An unacknowledged Next/Previous at the end of the list would point past it, which
-            // media3 rejects ("currentMediaItemIndex must be less than playlist.size()").
-            val position = currentPosition.coerceIn(list.offset, list.offset + list.items.size - 1)
+        val knownPlaylist = playerState.playlist?.takeIf { it.items.isNotEmpty() }
+        val (playlist, currentIndex) = knownPlaylist?.let { list ->
+            val currentPosition = unacknowledgedChange?.playlistPosition
+                ?: playerState.playlistPosition
+            val position = currentPosition.coerceIn(list.offset, list.offset + list.items.lastIndex)
             val mediaList: List<MediaItemData> = list.items.mapIndexed { index, item ->
-                val builder = if (index + list.offset == position) {
+                val builder = if (index + list.offset == playerState.playlistPosition) {
                     // Prefer current song from status over playlist item, because the former
                     // may be more up to date (e.g. in case of radio streams)
                     currentSong.toMediaItemDataBuilder(index).apply {
@@ -278,22 +231,18 @@ class SqueezeboxMediaPlayer(
             add(COMMAND_GET_TIMELINE)
             add(COMMAND_PLAY_PAUSE)
             if (playerState.currentSongDuration != null &&
+                (unacknowledgedChange?.playlistPosition ?: playerState.playlistPosition) ==
+                playerState.playlistPosition &&
                 playerState.playbackState != PlayerStatus.PlayState.Stopped
             ) {
                 add(COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
             }
             add(COMMAND_SEEK_TO_MEDIA_ITEM)
-            if (currentIndex < playlist.size - 1) {
-                add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-                add(COMMAND_SEEK_TO_NEXT)
-            }
-            if (currentIndex > 0) {
-                add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-                add(COMMAND_SEEK_TO_PREVIOUS)
-            }
+            add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            add(COMMAND_SEEK_TO_NEXT)
+            add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            add(COMMAND_SEEK_TO_PREVIOUS)
             add(COMMAND_STOP)
-            // The mixer volume the user chose; the local player treats it as the authority.
-            LocalPlayerVolume.publish(playerState.currentVolume)
             if (playerState.currentVolume != null) {
                 add(COMMAND_ADJUST_DEVICE_VOLUME_WITH_FLAGS)
                 add(COMMAND_GET_DEVICE_VOLUME)
@@ -301,8 +250,6 @@ class SqueezeboxMediaPlayer(
             }
         }
 
-        // Report the state we are acting on rather than the server's: a press takes effect
-        // immediately, and a status that is still in flight must not flip the button back.
         val reportedPlayState = unacknowledgedChange?.playState ?: playerState.playbackState
         val playWhenReady = reportedPlayState == PlayerStatus.PlayState.Playing
         val playbackState = when {
@@ -322,8 +269,8 @@ class SqueezeboxMediaPlayer(
             .setAvailableCommands(commandsBuilder.build())
             .setContentPositionMs(
                 unacknowledgedChange?.positionInTrack?.inWholeMilliseconds
-                    ?: LocalPlayerPosition.forPlayer(currentPlayer)
-                        ?.toLong(DurationUnit.MILLISECONDS)
+                    ?: connectionHelper.localPlayPosition(currentPlayer, playerState.status)
+                        ?.inWholeMilliseconds
                     ?: playerState.currentPlayPosition?.toLong(DurationUnit.MILLISECONDS)
                     ?: C.TIME_UNSET
             )
@@ -342,76 +289,49 @@ class SqueezeboxMediaPlayer(
         }
         playerState.muted?.let { builder.setIsDeviceMuted(it) }
 
-        Diag.log(
-            "getState",
-            "published=${Diag.song(currentSong)} index=$currentIndex items=${playlist.size} " +
-                "pbState=$playbackState playWhenReady=$playWhenReady " +
-                "song=${Diag.song(playerState.currentSong)} " +
-                "statusSong=${Diag.song(pendingPlayerState.status?.playlist?.nowPlaying)} " +
-                "playlistRev=${Diag.rev(playerState.playlist?.timestamp)} " +
-                "pending=${Diag.rev(pendingPlayerState.status?.playlist?.lastChange)} " +
-                "unack=$unacknowledgedChange"
-        )
         return builder.build()
-    }
-
-    /**
-     * The song a relative playlist move leads to, as far as we know it. A track change should
-     * show the new song right away: until the server confirms it, the previous song (whose
-     * playlist revision is still current) would otherwise be reported for a moment, which makes
-     * head units flip back to it and then forward again.
-     */
-    private fun songAtOffset(offset: Int): Playlist.PlaylistItem? {
-        val state = playerState ?: return null
-        val playlist = state.playlist ?: return null
-        return playlist.items.getOrNull(state.playlistPosition + offset)
     }
 
     private fun updateUnacknowledgedState(
         absolutePlaylistPosition: Int? = null,
         playlistPositionOffset: Int? = null,
         positionInTrack: Duration? = null,
-        playState: PlayerStatus.PlayState? = null,
-        song: Playlist.PlaylistItem? = null
+        playState: PlayerStatus.PlayState? = null
     ) {
-        val newPlayState = playState ?: unacknowledgedStateChange?.playState
-        val newSong = song ?: unacknowledgedStateChange?.song
-        val newPositionInTrack = positionInTrack ?: unacknowledgedStateChange?.positionInTrack
-        val newAbsolutePosition = absolutePlaylistPosition
-            ?: unacknowledgedStateChange?.absolutePlaylistPosition
-        val existingOffset = unacknowledgedStateChange?.playlistPositionOffset
-        val newOffset = when {
-            // absolute position takes precedence
-            newAbsolutePosition != null -> null
-
-            playlistPositionOffset != null && existingOffset != null ->
-                existingOffset + playlistPositionOffset
-
-            playlistPositionOffset != null -> playlistPositionOffset
-
-            else -> existingOffset
+        val state = playerState ?: return
+        var change = unacknowledgedStateChange ?: PendingPlayerCommands()
+        if (absolutePlaylistPosition != null || playlistPositionOffset != null) {
+            change = change.seekTo(
+                absolutePlaylistPosition ?: (
+                    (change.playlistPosition ?: state.playlistPosition) +
+                        (playlistPositionOffset ?: 0)
+                    ),
+                positionInTrack ?: Duration.ZERO,
+                state.playlistTimestamp,
+                state.trackCount,
+                state.repeatState == PlayerStatus.RepeatState.RepeatAll
+            )
+        } else if (positionInTrack != null) {
+            change = change.copy(
+                positionInTrack = positionInTrack,
+                playlistTimestamp = state.playlistTimestamp
+            )
         }
-        val playlistLength = pendingPlayerState.playlist?.totalCount ?: Int.MAX_VALUE
-
-        unacknowledgedStateChange = UnacknowledgedPlayerStateChange(
-            newAbsolutePosition
-                ?.plus(playlistPositionOffset ?: 0)
-                ?.coerceIn(0, playlistLength),
-            newOffset?.coerceIn(0, playlistLength),
-            newPositionInTrack,
-            newPlayState,
-            newSong
-        )
-        Diag.log("unack", "reporting $unacknowledgedStateChange until the server confirms")
+        unacknowledgedStateChange = change.copy(playState = playState ?: change.playState)
         invalidateState()
 
         unacknowledgedStateRevertJob?.cancel()
         unacknowledgedStateRevertJob = launch {
-            // Give the server some reasoanble amount of time to react
+            // Give the server some reasonable amount of time to react
             delay(3.seconds)
-            unacknowledgedStateChange = null
+            clearUnacknowledgedState()
             invalidateState()
         }
+    }
+
+    private fun clearUnacknowledgedState() {
+        unacknowledgedStateChange = null
+        unacknowledgedStateRevertJob?.cancel()
     }
 
     /**
@@ -435,8 +355,6 @@ class SqueezeboxMediaPlayer(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun updatePlayer(playerId: PlayerId?) {
-        Diag.log("player", "updatePlayer($playerId)")
-        statusSubscriptionStartTime = SystemClock.elapsedRealtime()
         statusSubscription?.cancel()
         if (playerId == null || !isConnectedToServer) {
             return
@@ -453,49 +371,25 @@ class SqueezeboxMediaPlayer(
     private fun handlePlayerStatusUpdate(playerId: PlayerId, status: PlayerStatus) {
         val latestStatus = pendingPlayerState.status
         val newPlaylistTimestamp = status.playlist.lastChange
-        Diag.log(
-            "status",
-            "recv rev=${Diag.rev(newPlaylistTimestamp)} " +
-                "song=${Diag.song(status.playlist.nowPlaying)} " +
-                "idx=${status.playlist.currentPosition}/${status.playlist.trackCount} " +
-                "state=${status.playbackState} powered=${status.powered} " +
-                "vol=${status.currentVolume} muted=${status.muted} " +
-                "knownRev=${Diag.rev(latestStatus?.playlist?.lastChange)}"
-        )
         if (latestStatus != null && newPlaylistTimestamp < latestStatus.playlist.lastChange) {
             // The new status is older than what we already know about -> ignore it
-            val knownRev = Diag.rev(latestStatus.playlist.lastChange)
-            Diag.log("status", "-> dropped, older than $knownRev")
             return
         }
 
-        rememberLatestStatus(status)
-
-        if (status.playlist.lastChange != latestStatus?.playlist?.lastChange) {
+        if (status.playlist.trackCount == 0) {
             playlistFetchJob?.cancel()
-            Diag.log("playlist", "fetch start rev=${Diag.rev(status.playlist.lastChange)}")
+            pendingPlayerState.playlist = null
+        } else if (status.playlist.lastChange != latestStatus?.playlist?.lastChange) {
+            playlistFetchJob?.cancel()
             playlistFetchJob = lifecycle.coroutineScope.launch {
                 val playlist = connectionHelper.fetchPlaylist(playerId, PagingParams.All)
-                Diag.log(
-                    "playlist",
-                    "fetch done rev=${Diag.rev(playlist.timestamp)} " +
-                        "items=${playlist.items.size} index=${playlist.currentIndex} " +
-                        "wanted=${Diag.rev(status.playlist.lastChange)}"
-                )
-                // A status for an empty playlist carries a fresh revision every time, and the
-                // playlist response carries yet another one - the two can never match there.
-                // Accept the response when both agree that the queue is empty; insisting on a
-                // match leaves the state stuck on the last queue forever.
-                val queueIsEmpty = playlist.items.isEmpty() && status.playlist.nowPlaying == null
-                if (playlist.timestamp == status.playlist.lastChange || queueIsEmpty) {
+                if (playlist.timestamp == status.playlist.lastChange) {
                     pendingPlayerState.playlist = playlist
                     // Player state update is scheduled asynchronously so that the update method
                     // notices the playlist fetch being done
                     lifecycle.coroutineScope.launch {
                         schedulePlayerStateUpdate()
                     }
-                } else {
-                    Diag.log("playlist", "fetch returned a different revision, ignored")
                 }
             }
         }
@@ -508,30 +402,22 @@ class SqueezeboxMediaPlayer(
         delayedStateUpdateJob?.cancel()
 
         val status = pendingPlayerState.status ?: return
-        val knownPlaylist = pendingPlayerState.playlist
-        val knownSong = playerState?.currentSong
-        // The song we knew last is only a fallback while we have no sign that the queue was
-        // emptied: an empty queue must not resurrect a song that is gone.
-        val nowPlaying = knownSong?.takeIf {
-            knownPlaylist == null || knownPlaylist.items.isNotEmpty()
-        }
-        val newPlayerState = PlayerState(status, nowPlaying, knownPlaylist)
+        val nowPlaying = playerState?.takeIf {
+            it.playlistPosition == status.playlist.currentPosition - 1 &&
+                it.playlistTimestamp == status.playlist.lastChange
+        }?.currentSong
+        val newPlayerState = PlayerState(status, nowPlaying, pendingPlayerState.playlist)
 
         when {
             newPlayerState.isCompleteAndConsistent() || playerState == null -> {
                 // Accept immediately if either
                 // - we don't have a state yet (don't wait for playlist)
                 // - or what we have looks consistent
-                Diag.log(
-                    "state",
-                    "apply immediately (consistent=${newPlayerState.isCompleteAndConsistent()})"
-                )
                 applyPlayerState(newPlayerState)
             }
 
             playlistFetchJob?.isActive == true -> {
                 // Playlist is currently being fetched; we'll come here again once that is done
-                Diag.log("state", "waiting for the playlist fetch")
             }
 
             else -> {
@@ -539,7 +425,6 @@ class SqueezeboxMediaPlayer(
                 // When we come here we have received a status update, fetched the playlist and
                 // the timestamps don't match. That means we'll likely get another status report
                 // which will trigger another playlist fetch.
-                Diag.log("state", "delaying apply by 500 ms (inconsistent data)")
                 delayedStateUpdateJob = lifecycle.coroutineScope.launch {
                     delay(500.milliseconds)
                     applyPlayerState(newPlayerState)
@@ -549,272 +434,15 @@ class SqueezeboxMediaPlayer(
     }
 
     private fun applyPlayerState(newPlayerState: PlayerState) {
-        LocalPlayerPosition.updateDuration(newPlayerState.currentSongDuration)
-        val previousSong = playerState?.currentSong
-        if (previousSong != null && previousSong != newPlayerState.currentSong) {
-            LocalPlayerPosition.noteSongChanged()
-        }
-        Diag.log(
-            "state",
-            "applied song=${Diag.song(newPlayerState.currentSong)} " +
-                "idx=${newPlayerState.playlistPosition} " +
-                "state=${newPlayerState.playbackState} " +
-                "playlistRev=${Diag.rev(newPlayerState.playlist?.timestamp)}"
-        )
-        val pending = unacknowledgedStateChange
         playerState = newPlayerState
-        // Keep reporting what we asked for until the server's state shows it; statuses for the
-        // still-current previous revision arrive in between and would flip the metadata and the
-        // play state back to the old values.
-        val songConfirmed = pending?.song == null || newPlayerState.currentSong == pending.song
-        val playStateConfirmed =
-            pending?.playState == null || newPlayerState.playbackState == pending.playState
-        if (pending == null || (songConfirmed && playStateConfirmed)) {
-            unacknowledgedStateChange = null
-            unacknowledgedStateRevertJob?.cancel()
-        }
+        unacknowledgedStateChange = unacknowledgedStateChange?.acknowledge(
+            newPlayerState.playlistPosition,
+            newPlayerState.currentPlayPosition,
+            newPlayerState.playbackState,
+            newPlayerState.playlistTimestamp
+        )
+        if (unacknowledgedStateChange == null) unacknowledgedStateRevertJob?.cancel()
         invalidateState()
-        rememberPlaylist(newPlayerState)
-        restorePlaylistIfNeeded(newPlayerState)
-        rememberSession(newPlayerState)
-        resumeLastSession(newPlayerState)
-    }
-
-    /**
-     * Remembers where playback was left off, so an interrupted session can be continued (see
-     * [resumeLastSession]).
-     */
-    private fun rememberSession(state: PlayerState) {
-        val playerId = currentPlayer ?: return
-        if (!isLocalPlayer(playerId)) {
-            return
-        }
-        if (state.playbackState == PlayerStatus.PlayState.Playing) {
-            // Something is playing in this app run, so there is nothing to resume anymore
-            resumeAttempted = true
-            if (!sessionStoreDue()) {
-                return
-            }
-            val position = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
-            appContext.prefs.edit { putLastSession(playerId, position, true) }
-            return
-        }
-        // Ignore what the server reports right after (re)connecting: it may still report the
-        // player as stopped before its previous state has been restored.
-        val settled = SystemClock.elapsedRealtime() - statusSubscriptionStartTime >
-            SESSION_SETTLE_TIME.inWholeMilliseconds
-        if (!settled) {
-            return
-        }
-        if (!sessionStoreDue()) {
-            return
-        }
-        val position = state.currentPlayPosition?.inWholeSeconds?.toInt() ?: 0
-        appContext.prefs.edit { putLastSession(playerId, position, false) }
-    }
-
-    /** Whether the session should be remembered now; state updates arrive several times/s. */
-    private fun sessionStoreDue(): Boolean {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastSessionStore < SESSION_STORE_INTERVAL.inWholeMilliseconds) {
-            return false
-        }
-        lastSessionStore = now
-        return true
-    }
-
-    /**
-     * Remembers the playlist of the built-in player, as one url per entry. A player that stays
-     * disconnected is forgotten by the server, and so is its playlist; without a copy of the urls
-     * nothing could be restored when the player comes back.
-     */
-    private fun rememberPlaylist(state: PlayerState) {
-        val playerId = currentPlayer ?: return
-        if (!isLocalPlayer(playerId)) {
-            return
-        }
-        val playlist = state.playlist ?: return
-        if (playlist.items.isEmpty()) {
-            return
-        }
-        if (playlist == storedPlaylist) {
-            // The queue is known; where we are inside it is followed by the location updates.
-            return
-        }
-        if (playlist == playlistFetchAttempt) {
-            return
-        }
-        playlistFetchAttempt = playlist
-        launch {
-            val urls = connectionHelper.fetchPlaylistUrls(playerId) ?: return@launch
-            storedPlaylist = playlist
-            storedPlaylistUrls = urls
-            storePlaylistLocation()
-        }
-    }
-
-    /** Takes note of a status, so the stored playback location can be kept up to date. */
-    private fun rememberLatestStatus(status: PlayerStatus) {
-        latestStatus = status
-        lastStatusReceivedAt = SystemClock.elapsedRealtime()
-        storePlaylistLocation()
-    }
-
-    /**
-     * Keeps the stored playback location current, so a queue that the server dropped can be
-     * restored where it stopped. The server only reports its position every fifteen seconds or so,
-     * which is why the location is also stored between status updates - see
-     * [startPlaylistLocationUpdates].
-     */
-    private fun storePlaylistLocation() {
-        val playerId = currentPlayer ?: return
-        if (!isLocalPlayer(playerId)) {
-            return
-        }
-        val urls = storedPlaylistUrls ?: return
-        val status = latestStatus ?: return
-        val index = (status.playlist.currentPosition - 1).coerceAtLeast(0)
-        val wasPlaying = status.playbackState == PlayerStatus.PlayState.Playing
-        val position = playbackPosition(status, wasPlaying) ?: return
-        appContext.prefs.edit {
-            putLastPlaylist(playerId, urls, index, position, wasPlaying)
-        }
-    }
-
-    /** Starts storing the playback location periodically while the server connection is up. */
-    private fun startPlaylistLocationUpdates() {
-        if (playlistLocationJob != null) {
-            return
-        }
-        playlistLocationJob = lifecycle.coroutineScope.launch {
-            while (true) {
-                delay(PLAYLIST_STORE_INTERVAL)
-                storePlaylistLocation()
-            }
-        }
-    }
-
-    /**
-     * The position playback is at as far as the app knows it: the player's own position while it
-     * plays the stream itself, the last reported one advanced by the time since, otherwise.
-     */
-    private fun playbackPosition(status: PlayerStatus, wasPlaying: Boolean): Int? {
-        LocalPlayerPosition.forPlayer(currentPlayer)?.let {
-            return it.inWholeSeconds.toInt()
-        }
-        val reported = status.currentPlayPosition ?: return null
-        if (!wasPlaying) {
-            return reported.inWholeSeconds.toInt()
-        }
-        val age = SystemClock.elapsedRealtime() - lastStatusReceivedAt
-        return ((reported.inWholeMilliseconds + age) / 1000).toInt()
-    }
-
-    /**
-     * Puts the remembered playlist back when the server dropped it: a player that stays
-     * disconnected for more than five minutes is forgotten by the server, and when it comes back
-     * its playlist is empty although the user did not clear it. Only done for the built-in
-     * player - the playlist of a player controlled from elsewhere may have been cleared on
-     * purpose.
-     */
-    private fun restorePlaylistIfNeeded(state: PlayerState) {
-        val playerId = currentPlayer ?: return
-        if (!isLocalPlayer(playerId) || playlistRestoreAttempted || !state.powered) {
-            return
-        }
-        if (state.playlistCount > 0) {
-            // The server still knows the playlist, so there is nothing to restore.
-            playlistRestoreAttempted = true
-            return
-        }
-        val prefs = appContext.prefs
-        val urls = prefs.lastPlaylistUrls
-        val recentlyConnected = lastConnectedTime == 0L ||
-            SystemClock.elapsedRealtime() - lastConnectedTime <
-            PLAYLIST_RESTORE_WINDOW.inWholeMilliseconds
-        val playlistAge = System.currentTimeMillis() - prefs.lastPlaylistTimestamp
-        playlistRestoreAttempted = true
-        if (!recentlyConnected || urls.isEmpty() || prefs.lastPlaylistPlayer != playerId ||
-            playlistAge > PLAYLIST_MAX_AGE.inWholeMilliseconds
-        ) {
-            return
-        }
-        val index = prefs.lastPlaylistIndex.coerceIn(0, urls.size - 1)
-        val position = prefs.lastPlaylistPosition
-        val wasPlaying = prefs.lastPlaylistWasPlaying
-        Diag.log(
-            "playlist",
-            "restoring the playlist of the last session (${urls.size} items, " +
-                "index $index, position ${position}s, playing=$wasPlaying)"
-        )
-        launch {
-            connectionHelper.restorePlaylist(playerId, urls)
-            if (index > 0) {
-                // Move the rebuilt queue back to the entry it stopped at, without starting it.
-                connectionHelper.advanceToPlaylistPosition(playerId, index)
-            }
-            if (wasPlaying) {
-                connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Playing)
-                if (position > 0) {
-                    delay(PLAYLIST_SEEK_DELAY)
-                }
-            }
-            if (position > 0) {
-                connectionHelper.updatePlaybackPosition(playerId, position)
-            }
-        }
-    }
-
-    /**
-     * Continues the session that was interrupted by the app being stopped or by the connection to
-     * the server going away, at the position it was left at.
-     */
-    private fun resumeLastSession(state: PlayerState) {
-        val playerId = currentPlayer ?: return
-        if (!isLocalPlayer(playerId) || resumeAttempted) {
-            return
-        }
-        val prefs = appContext.prefs
-        val lastPlayer = prefs.lastSessionPlayer
-        val age = System.currentTimeMillis() - prefs.lastSessionTimestamp
-        val resumable = prefs.resumePlayback && lastPlayer == playerId &&
-            age < SESSION_MAX_AGE.inWholeMilliseconds
-        Diag.log(
-            "resume",
-            "resumable=$resumable player=$playerId lastPlayer=$lastPlayer " +
-                "wasPlaying=${prefs.lastSessionWasPlaying} ageMs=$age " +
-                "position=${prefs.lastSessionPosition} state=${state.playbackState} " +
-                "powered=${state.powered}"
-        )
-        if (state.playbackState == PlayerStatus.PlayState.Playing || !resumable) {
-            resumeAttempted = true
-            return
-        }
-        if (!state.powered || state.currentSong == null) {
-            // Wait until the player is powered on and knows its playlist
-            return
-        }
-        resumeAttempted = true
-        val position = prefs.lastSessionPosition
-        // The server's own position is not necessarily used for the stream it starts next, so
-        // seek explicitly: immediately for a paused session, after playback was started
-        // otherwise (where the seek needs a running stream to apply to).
-        val restartPlayback = prefs.lastSessionWasPlaying
-        Diag.log(
-            "resume",
-            "restoring position $position, restartPlayback=$restartPlayback"
-        )
-        launch {
-            if (restartPlayback) {
-                connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Playing)
-            }
-            if (position > SESSION_MIN_POSITION.inWholeSeconds) {
-                if (restartPlayback) {
-                    delay(SESSION_SEEK_DELAY)
-                }
-                connectionHelper.updatePlaybackPosition(playerId, position)
-            }
-        }
     }
 
     private fun Playlist.PlaylistItem.toMediaItemDataBuilder(position: Int): MediaItemData.Builder {
@@ -840,68 +468,29 @@ class SqueezeboxMediaPlayer(
     }
 
     private data class PlayerState(
-        private val status: PlayerStatus,
+        val status: PlayerStatus,
         private val nowPlayingFallback: Playlist.PlaylistItem?,
         val playlist: Playlist?
     ) {
         val currentVolume get() = status.currentVolume
-        val currentSong get() = status.playlist.nowPlaying ?: nowPlayingFallback
+        val currentSong get() = if (status.playlist.trackCount == 0) {
+            null
+        } else {
+            status.playlist.nowPlaying
+                ?: playlist?.items?.getOrNull(playlistPosition - playlist.offset)
+                ?: nowPlayingFallback
+        }
         val currentSongDuration get() = status.currentSongDuration
         val currentPlayPosition get() = status.currentPlayPosition
         val playlistPosition get() = status.playlist.currentPosition - 1
-        val playlistCount get() = status.playlist.trackCount
+        val playlistTimestamp get() = status.playlist.lastChange
+        val trackCount get() = status.playlist.trackCount
+        val repeatState get() = status.repeatState
         val playbackState get() = status.playbackState
         val powered get() = status.powered
         val muted get() = status.muted
 
-        fun isCompleteAndConsistent() = playlist != null &&
-            (
-                status.playlist.lastChange == playlist.timestamp ||
-                    // A status and a playlist that agree the queue is empty are consistent as well;
-                    // their revisions can never match, because the server reports a fresh one for an
-                    // empty playlist on every request.
-                    (playlist.items.isEmpty() && status.playlist.nowPlaying == null)
-                )
-    }
-
-    private data class UnacknowledgedPlayerStateChange(
-        val absolutePlaylistPosition: Int? = null,
-        val playlistPositionOffset: Int? = null,
-        val positionInTrack: Duration? = null,
-        val playState: PlayerStatus.PlayState? = null,
-        val song: Playlist.PlaylistItem? = null
-    )
-
-    companion object {
-        // Time a remembered session is considered worth resuming.
-        private val SESSION_MAX_AGE = 12.hours
-
-        // Don't resume positions very close to the start of a track.
-        private val SESSION_MIN_POSITION = 5.seconds
-
-        // Time to wait after starting playback before seeking to the resumed position; the seek
-        // needs a running stream to apply to.
-        private val SESSION_SEEK_DELAY = 2.seconds
-
-        // Grace period after (re)connecting during which reported state is not remembered; the
-        // server may still report the player as stopped before restoring its previous state.
-        private val SESSION_SETTLE_TIME = 10.seconds
-
-        // Minimum time between two stored session positions.
-        private val SESSION_STORE_INTERVAL = 15.seconds
-
-        // Time after (re)connecting during which an empty playlist is taken as "the server
-        // forgot the player" and the remembered playlist is put back.
-        private val PLAYLIST_RESTORE_WINDOW = 2.minutes
-
-        // Time a remembered playlist is considered worth restoring.
-        private val PLAYLIST_MAX_AGE = 12.hours
-
-        // Minimum time between two stored playback locations of the same queue.
-        private val PLAYLIST_STORE_INTERVAL = 15.seconds
-
-        // Time to wait after starting playback before seeking to the remembered position; the
-        // seek needs a running stream to apply to.
-        private val PLAYLIST_SEEK_DELAY = 2.seconds
+        fun isCompleteAndConsistent() = status.playlist.trackCount == 0 ||
+            (playlist != null && status.playlist.lastChange == playlist.timestamp)
     }
 }

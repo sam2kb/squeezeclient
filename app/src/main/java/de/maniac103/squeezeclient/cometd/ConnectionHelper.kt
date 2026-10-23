@@ -19,7 +19,6 @@ package de.maniac103.squeezeclient.cometd
 
 import android.util.Log
 import de.maniac103.squeezeclient.SqueezeClientApplication
-import de.maniac103.squeezeclient.cometd.request.AddPlaylistItemRequest
 import de.maniac103.squeezeclient.cometd.request.ChangePlaybackStateRequest
 import de.maniac103.squeezeclient.cometd.request.ClearPlaylistRequest
 import de.maniac103.squeezeclient.cometd.request.CurrentTrackInfoRequest
@@ -39,7 +38,6 @@ import de.maniac103.squeezeclient.cometd.request.MovePlaylistItemRequest
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.cometd.request.PlayerPowerRequest
 import de.maniac103.squeezeclient.cometd.request.PlayerStatusRequest
-import de.maniac103.squeezeclient.cometd.request.PlaylistUrlsRequest
 import de.maniac103.squeezeclient.cometd.request.RadioSearchRequest
 import de.maniac103.squeezeclient.cometd.request.RemovePlaylistItemRequest
 import de.maniac103.squeezeclient.cometd.request.Request
@@ -61,7 +59,6 @@ import de.maniac103.squeezeclient.cometd.response.FavoritesExistsResponse
 import de.maniac103.squeezeclient.cometd.response.JiveHomeItemListResponse
 import de.maniac103.squeezeclient.cometd.response.LocalSearchResultsResponse
 import de.maniac103.squeezeclient.cometd.response.PlayerStatusResponse
-import de.maniac103.squeezeclient.cometd.response.PlaylistUrlsResponse
 import de.maniac103.squeezeclient.cometd.response.ServerStatusResponse
 import de.maniac103.squeezeclient.cometd.response.SlideshowListResponse
 import de.maniac103.squeezeclient.cometd.response.SlimBrowseListResponse
@@ -83,6 +80,7 @@ import de.maniac103.squeezeclient.model.PagingParams
 import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.SlimBrowseItemList
+import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
 import de.maniac103.squeezeclient.service.localplayer.PositionChangeRequests
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration.Companion.seconds
@@ -137,6 +135,18 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
     private var pendingDisconnectJob: Job? = null
     private var mediaDirectories = listOf<String>()
     private var nextRequestId = 1
+    val localPlayerPosition = LocalPlayerPosition()
+    val positionChangeRequests = PositionChangeRequests()
+
+    fun lastPlayerStatus(playerId: PlayerId) =
+        playerStates[playerId]?.playStatus?.replayCache?.lastOrNull()
+
+    fun localPlayPosition(playerId: PlayerId?, status: PlayerStatus) =
+        localPlayerPosition.takeIf { it.server == appContext.prefs.serverConfig?.url?.toString() }
+            ?.forPlayer(playerId, status)
+
+    suspend fun fetchPlayerStatus(playerId: PlayerId) =
+        doRequestWithResult<PlayerStatusResponse>(PlayerStatusRequest(playerId)).asModelStatus(json)
 
     fun connect() {
         if (connectionScope != null) {
@@ -270,39 +280,27 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
             PlayerStatusRequest(playerId, page)
         ).asModelPlaylist(json, page.start.toInt())
 
-    /**
-     * The urls of the player's playlist, in order, or null if they could not be read. Neither is
-     * part of the menu flavored status the UI uses, but the built-in player needs them to restore
-     * its playlist after the server dropped the player.
-     */
-    suspend fun fetchPlaylistUrls(playerId: PlayerId): List<String>? = runCatching {
-        doRequestWithResult<PlaylistUrlsResponse>(PlaylistUrlsRequest(playerId)).urls
-            .takeIf { it.isNotEmpty() }
-    }.getOrNull()
-
-    /** Restores a playlist from its urls; the server only takes a single url per command. */
-    suspend fun restorePlaylist(playerId: PlayerId, urls: List<String>) {
-        urls.forEach { publishCommand(AddPlaylistItemRequest(playerId, it)) }
-    }
-
     suspend fun movePlaylistItem(playerId: PlayerId, fromPosition: Int, toPosition: Int) =
-        publishCommand(MovePlaylistItemRequest(playerId, fromPosition, toPosition))
+        publishOneShotRequest(MovePlaylistItemRequest(playerId, fromPosition, toPosition))
 
     suspend fun removePlaylistItem(playerId: PlayerId, position: Int) =
-        publishCommand(RemovePlaylistItemRequest(playerId, position))
+        publishOneShotRequest(RemovePlaylistItemRequest(playerId, position))
 
-    suspend fun advanceToPlaylistPosition(playerId: PlayerId, position: Int) = publishCommand(
-        SetPlaylistPositionRequest(playerId, position, appContext.prefs.fadeInDuration)
-    )
+    suspend fun advanceToPlaylistPosition(playerId: PlayerId, position: Int) =
+        publishPositionCommand(
+            playerId,
+            null,
+            SetPlaylistPositionRequest(playerId, position, appContext.prefs.fadeInDuration)
+        )
 
     suspend fun clearCurrentPlaylist(playerId: PlayerId) =
-        publishCommand(ClearPlaylistRequest(playerId))
+        publishOneShotRequest(ClearPlaylistRequest(playerId))
 
     suspend fun saveCurrentPlaylist(playerId: PlayerId, name: String) =
-        publishCommand(SavePlaylistRequest(playerId, name))
+        publishOneShotRequest(SavePlaylistRequest(playerId, name))
 
     suspend fun executeAction(playerId: PlayerId, action: JiveAction) =
-        publishCommand(ExecuteActionRequest(playerId, action))
+        publishOneShotRequest(ExecuteActionRequest(playerId, action))
 
     suspend fun changePlaybackState(playerId: PlayerId, state: PlayerStatus.PlayState) {
         val currentState = playerStates[playerId]
@@ -313,24 +311,21 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
         val request = when (state) {
             PlayerStatus.PlayState.Stopped -> ChangePlaybackStateRequest.Stop(playerId)
 
-            PlayerStatus.PlayState.Paused -> if (currentState == PlayerStatus.PlayState.Playing) {
-                ChangePlaybackStateRequest.Pause(playerId)
-            } else {
-                null
-            }
+            PlayerStatus.PlayState.Paused -> ChangePlaybackStateRequest.Pause(playerId)
 
             PlayerStatus.PlayState.Playing -> if (currentState == PlayerStatus.PlayState.Paused) {
                 ChangePlaybackStateRequest.Unpause(playerId, appContext.prefs.fadeInDuration)
             } else {
                 ChangePlaybackStateRequest.Play(playerId, appContext.prefs.fadeInDuration)
             }
-        } ?: return
+        }
         publishCommand(request)
     }
 
     suspend fun syncPlayers(masterPlayerId: PlayerId, slavePlayerId: PlayerId) =
-        publishCommand(SyncPlayersRequest(masterPlayerId, slavePlayerId))
-    suspend fun unsyncPlayer(playerId: PlayerId) = publishCommand(UnsyncPlayerRequest(playerId))
+        publishOneShotRequest(SyncPlayersRequest(masterPlayerId, slavePlayerId))
+    suspend fun unsyncPlayer(playerId: PlayerId) =
+        publishOneShotRequest(UnsyncPlayerRequest(playerId))
 
     suspend fun setMuteState(playerId: PlayerId, muted: Boolean) =
         publishCommand(SetMuteStateRequest(playerId, muted))
@@ -353,23 +348,22 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
     suspend fun togglePower(playerId: PlayerId) = publishCommand(PlayerPowerRequest(playerId, null))
     suspend fun setPowerState(playerId: PlayerId, on: Boolean) =
         publishCommand(PlayerPowerRequest(playerId, on))
-    suspend fun sendButtonRequest(request: PlaybackButtonRequest) = publishCommand(request)
-
-    suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) {
-        PositionChangeRequests.note(positionSeconds)
-        publishCommand(SetPlaybackPositionRequest(playerId, positionSeconds))
+    suspend fun sendButtonRequest(request: PlaybackButtonRequest) {
+        if (request is PlaybackButtonRequest.NextTrack ||
+            request is PlaybackButtonRequest.PreviousTrack
+        ) {
+            publishPositionCommand(request.targetPlayerId, null, request)
+        } else {
+            publishCommand(request)
+        }
     }
 
-    /**
-     * The position (in seconds) the server assumes the player to be at, or null if it does not
-     * know (no connection) or is not playing (in which case its position is meaningless).
-     */
-    suspend fun fetchPlaybackPositionSeconds(playerId: PlayerId): Int? = runCatching {
-        val status = doRequestWithResult<PlayerStatusResponse>(PlayerStatusRequest(playerId))
-        status.playPosition
-            .takeIf { status.state == PlayerStatus.PlayState.Playing }
-            ?.toInt()
-    }.getOrNull()
+    suspend fun updatePlaybackPosition(playerId: PlayerId, positionSeconds: Int) =
+        publishPositionCommand(
+            playerId,
+            positionSeconds,
+            SetPlaybackPositionRequest(playerId, positionSeconds)
+        )
 
     suspend fun getLocalLibrarySearchResultCounts(
         searchTerm: String
@@ -419,17 +413,36 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
         return json.decodeFromJsonElement<T>(jsonData)
     }
 
-    /**
-     * Sends a command nobody waits for. If it cannot be delivered - the server is unreachable or
-     * the connection is being re-established - it is dropped: the server cannot act on it anyway,
-     * and a command must never take its caller down with it.
-     */
+    private suspend fun publishPositionCommand(
+        playerId: PlayerId,
+        position: Int?,
+        request: Request
+    ) {
+        val pending = if (localPlayerPosition.server ==
+            appContext.prefs.serverConfig?.url?.toString()
+        ) {
+            positionChangeRequests.note(
+                playerId,
+                position,
+                lastPlayerStatus(playerId)?.playlist?.currentPosition,
+                lastPlayerStatus(playerId)?.playlist?.nowPlaying
+            )
+        } else {
+            null
+        }
+        try {
+            publishOneShotRequest(request)
+        } catch (e: Exception) {
+            positionChangeRequests.clear(pending)
+            if (e !is CometdClient.CometdException) throw e
+            Log.d(TAG, "Could not send $request", e)
+        }
+    }
+
     private suspend fun publishCommand(request: Request) {
         try {
             publishOneShotRequest(request)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
+        } catch (e: CometdClient.CometdException) {
             Log.d(TAG, "Could not send $request", e)
         }
     }
@@ -661,13 +674,9 @@ class ConnectionHelper(private val appContext: SqueezeClientApplication) {
                         jobHolder.cancel(e)
                     }
                     if (subscribed) {
-                        // Not connected (yet); the subscription below delivers the state once
-                        // we are, so nothing the initial request can fail with must be fatal.
                         try {
                             requestMethod()?.let { emit(it) }
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
+                        } catch (e: CometdClient.CometdException) {
                             Log.d(TAG, "Could not request the initial state", e)
                         }
                         jobHolder.launch {

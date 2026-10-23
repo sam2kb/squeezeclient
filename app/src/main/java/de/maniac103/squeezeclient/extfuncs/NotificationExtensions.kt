@@ -32,6 +32,7 @@ fun NotificationManagerCompat.getOrCreateNotificationChannel(
         .apply {
             setName(res.getString(info.nameResId))
             setDescription(res.getString(info.descResId))
+            setShowBadge(info.showBadge)
             setLightsEnabled(false)
             setVibrationEnabled(false)
             setSound(null, null)

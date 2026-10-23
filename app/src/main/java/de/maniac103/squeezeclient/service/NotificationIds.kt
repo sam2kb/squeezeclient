@@ -31,7 +31,8 @@ object NotificationIds {
         val id: String,
         @param:StringRes val nameResId: Int,
         @param:StringRes val descResId: Int,
-        val importance: Int
+        val importance: Int,
+        val showBadge: Boolean = true
     )
 
     val CHANNEL_MEDIA_CONTROL = ChannelInfo(
@@ -51,6 +52,7 @@ object NotificationIds {
         "local_playback",
         R.string.local_player_notification_channel_name,
         R.string.local_player_notification_channel_description,
-        NotificationManagerCompat.IMPORTANCE_MIN
+        NotificationManagerCompat.IMPORTANCE_MIN,
+        showBadge = false
     )
 }

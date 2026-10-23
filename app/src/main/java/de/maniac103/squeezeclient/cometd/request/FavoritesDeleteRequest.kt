@@ -19,9 +19,5 @@ package de.maniac103.squeezeclient.cometd.request
 
 import de.maniac103.squeezeclient.model.PlayerId
 
-/**
- * Removes a track from the favorites without asking for confirmation, as opposed to the
- * jivefavorites command used by the favorites context menu action.
- */
 class FavoritesDeleteRequest(playerId: PlayerId, url: String, title: String) :
     NonPagedPlayerRequest(playerId, "favorites", "delete", "url:$url", "title:$title")

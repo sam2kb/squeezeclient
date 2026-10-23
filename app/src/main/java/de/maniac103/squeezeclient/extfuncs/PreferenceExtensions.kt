@@ -32,8 +32,7 @@ val SharedPreferences.forceGridLayout get() =
 val SharedPreferences.serverConfig: ServerConfiguration? get() {
     val name = getString("server_name", null)
     val hostnameAndPort = getString("server_url", null)
-    // Treat a saved but empty address as no configuration at all; ServerConfiguration.url would
-    // throw for it, and the app would crash on every connect attempt.
+    // A saved blank address cannot form a URL.
     return if (name != null && !hostnameAndPort.isNullOrBlank()) {
         ServerConfiguration(
             name,
@@ -80,67 +79,6 @@ fun SharedPreferences.Editor.putLocalPlayerEnabled(enabled: Boolean) {
     putBoolean("local_player_enabled", enabled)
 }
 
-val SharedPreferences.resumePlayback get() = getBoolean("resume_playback", true)
-
-val SharedPreferences.lastSessionPlayer: PlayerId?
-    get() = getString("last_session_player", null)?.let { PlayerId(it) }
-
-val SharedPreferences.lastSessionPosition get() = getInt("last_session_position", 0)
-
-val SharedPreferences.lastSessionWasPlaying get() =
-    getBoolean("last_session_was_playing", false)
-
-val SharedPreferences.lastSessionTimestamp get() = getLong("last_session_timestamp", 0L)
-
-fun SharedPreferences.Editor.putLastSession(
-    playerId: PlayerId,
-    positionSeconds: Int,
-    wasPlaying: Boolean
-) {
-    putString("last_session_player", playerId.id)
-    putInt("last_session_position", positionSeconds)
-    putBoolean("last_session_was_playing", wasPlaying)
-    putLong("last_session_timestamp", System.currentTimeMillis())
-}
-
-val SharedPreferences.lastPlaylistPlayer: PlayerId?
-    get() = getString("last_playlist_player", null)?.let { PlayerId(it) }
-
-/** The playlist of the built-in player, one url per entry. */
-val SharedPreferences.lastPlaylistUrls: List<String>
-    get() = getString("last_playlist_urls", null)
-        ?.split('\n')
-        .orEmpty()
-        .filter { it.isNotBlank() }
-
-val SharedPreferences.lastPlaylistIndex get() = getInt("last_playlist_index", 0)
-
-val SharedPreferences.lastPlaylistPosition get() = getInt("last_playlist_position", 0)
-
-val SharedPreferences.lastPlaylistWasPlaying get() =
-    getBoolean("last_playlist_was_playing", false)
-
-val SharedPreferences.lastPlaylistTimestamp get() = getLong("last_playlist_timestamp", 0L)
-
-fun SharedPreferences.Editor.putLastPlaylist(
-    playerId: PlayerId,
-    urls: List<String>,
-    index: Int,
-    positionSeconds: Int,
-    wasPlaying: Boolean
-) {
-    putString("last_playlist_player", playerId.id)
-    putString("last_playlist_urls", urls.joinToString("\n"))
-    putInt("last_playlist_index", index)
-    putInt("last_playlist_position", positionSeconds)
-    putBoolean("last_playlist_was_playing", wasPlaying)
-    putLong("last_playlist_timestamp", System.currentTimeMillis())
-}
-
-fun SharedPreferences.Editor.clearLastPlaylist() {
-    remove("last_playlist_urls")
-}
-
 enum class LocalPlayerVolumeMode(val prefValue: String) {
     PlayerOnly("playeronly"),
     Device("device"),
@@ -150,7 +88,7 @@ enum class LocalPlayerVolumeMode(val prefValue: String) {
 val SharedPreferences.localPlayerVolumeMode: LocalPlayerVolumeMode get() {
     val value = getString(
         "local_player_volume_mode",
-        LocalPlayerVolumeMode.DeviceWhilePlaying.prefValue
+        LocalPlayerVolumeMode.PlayerOnly.prefValue
     )
     return LocalPlayerVolumeMode.entries.find { value == it.prefValue }
         ?: throw IllegalStateException("Local player volume mode value $value has no mapping")
@@ -170,16 +108,6 @@ fun SharedPreferences.Editor.putServerConfig(config: ServerConfiguration) {
 fun SharedPreferences.Editor.putLastSelectedPlayer(playerId: PlayerId) {
     putString("active_player", playerId.id)
 }
-
-/** MAC address the local player reports to the server, derived from the device identifier. */
-val SharedPreferences.localPlayerMac: ByteArray
-    get() = ByteArray(6) { i ->
-        getOrCreateDeviceIdentifier().leastSignificantBits.shr(i * 8).toByte()
-    }
-
-/** Player id of the local player, as the server knows it. */
-val SharedPreferences.localPlayerId: PlayerId
-    get() = PlayerId(localPlayerMac.joinToString(":") { "%02x".format(it) })
 
 fun SharedPreferences.getOrCreateDeviceIdentifier(): UUID {
     val existing = getString("device_identifier", null)

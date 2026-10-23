@@ -19,16 +19,15 @@ package de.maniac103.squeezeclient.ui.nowplaying
 
 import android.content.res.Configuration
 import android.os.Bundle
-import android.os.SystemClock
 import android.text.format.DateUtils
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
 import android.view.View
+import android.widget.Toast
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.constraintlayout.widget.ConstraintSet
-import androidx.core.content.edit
 import androidx.core.graphics.Insets
 import androidx.core.view.MenuProvider
 import androidx.core.view.ViewCompat
@@ -45,17 +44,16 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.slider.LabelFormatter
 import com.google.android.material.slider.Slider
 import de.maniac103.squeezeclient.R
+import de.maniac103.squeezeclient.cometd.CometdClient
 import de.maniac103.squeezeclient.cometd.ConnectionState
 import de.maniac103.squeezeclient.cometd.request.PlaybackButtonRequest
 import de.maniac103.squeezeclient.databinding.FragmentNowplayingBinding
 import de.maniac103.squeezeclient.extfuncs.backProgressInterpolator
-import de.maniac103.squeezeclient.extfuncs.clearLastPlaylist
 import de.maniac103.squeezeclient.extfuncs.connectionHelper
 import de.maniac103.squeezeclient.extfuncs.doOnTransitionCompleted
 import de.maniac103.squeezeclient.extfuncs.getParcelable
 import de.maniac103.squeezeclient.extfuncs.isRtl
 import de.maniac103.squeezeclient.extfuncs.loadArtwork
-import de.maniac103.squeezeclient.extfuncs.prefs
 import de.maniac103.squeezeclient.extfuncs.requireParentAs
 import de.maniac103.squeezeclient.model.JiveAction
 import de.maniac103.squeezeclient.model.PagingParams
@@ -63,25 +61,23 @@ import de.maniac103.squeezeclient.model.PlayerId
 import de.maniac103.squeezeclient.model.PlayerStatus
 import de.maniac103.squeezeclient.model.Playlist
 import de.maniac103.squeezeclient.model.SlimBrowseItemList
-import de.maniac103.squeezeclient.service.localplayer.LocalPlayerPosition
 import de.maniac103.squeezeclient.ui.bottomsheets.InputBottomSheetFragment
 import de.maniac103.squeezeclient.ui.common.ViewBindingFragment
 import de.maniac103.squeezeclient.ui.contextmenu.ContextMenuBottomSheetFragment
-import kotlin.math.absoluteValue
 import kotlin.math.max
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 import kotlin.time.ExperimentalTime
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 
 class NowPlayingFragment :
     ViewBindingFragment<FragmentNowplayingBinding>(FragmentNowplayingBinding::inflate),
@@ -96,7 +92,6 @@ class NowPlayingFragment :
             contextItem: SlimBrowseItemList.SlimBrowseItem
         ): Job?
         fun showVolumePopup()
-        fun showTransientMessage(vararg text: String)
     }
 
     private val playerId get() = requireArguments().getParcelable("playerId", PlayerId::class)
@@ -109,29 +104,16 @@ class NowPlayingFragment :
     private var sliderDragUpdateJob: Job? = null
     private var favoriteUpdateJob: Job? = null
     private var currentSong: Playlist.PlaylistItem? = null
+    private var userSeeking = false
+    private var trackingStartValue = 0F
     private var currentSongUrl: String? = null
     private var currentSongTitle: String? = null
     private var currentSongIsFavorite: Boolean? = null
 
-    /** Whether the user currently moves the slider; status updates must not move it then. */
-    private var userSeeking = false
-
-    /** When the user last touched or moved the slider, to recover from a lost touch end event. */
-    private var lastSeekInputTimestamp = 0L
-
-    /** Position the user seeked to, until the position reported by the server catches up. */
-    private var pendingSeekPosition: Float? = null
-    private var pendingSeekTimestamp = 0L
-
-    /** The song the seek above was requested for; a new song makes it stale. */
-    private var pendingSeekSong: Playlist.PlaylistItem? = null
-
-    /** The play state a press asked for, shown until the server reports it back. */
     private var pendingPlayState: PlayerStatus.PlayState? = null
     private var pendingPlayStateJob: Job? = null
 
-    /** The last state the server reported, to fall back to when a command never lands. */
-    private var lastStatus: PlayerStatus? = null
+    private var lastPlayState: PlayerStatus.PlayState? = null
 
     private val onBackPressedCallback = object : OnBackPressedCallback(false) {
         private var startedCollapse = false
@@ -276,27 +258,27 @@ class NowPlayingFragment :
             addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
                 override fun onStartTrackingTouch(slider: Slider) {
                     userSeeking = true
-                    lastSeekInputTimestamp = SystemClock.elapsedRealtime()
+                    trackingStartValue = slider.value
+                    sliderDragUpdateJob?.cancel()
                 }
 
                 override fun onStopTrackingTouch(slider: Slider) {
                     userSeeking = false
-                    sliderDragUpdateJob?.cancel()
-                    lifecycleScope.launch {
-                        seekTo(slider.value)
+                    if (slider.isEnabled && slider.value != trackingStartValue) {
+                        viewLifecycleOwner.lifecycleScope.launch {
+                            connectionHelper.updatePlaybackPosition(playerId, slider.value.toInt())
+                        }
                     }
                 }
             })
             addOnChangeListener { _, value, fromUser ->
                 binding.elapsedTime.text = DateUtils.formatElapsedTime(value.toLong())
-                if (fromUser) {
-                    lastSeekInputTimestamp = SystemClock.elapsedRealtime()
-                    // Touching the slider is the normal case and handled when the touch ends;
-                    // this also catches changes from keyboard or accessibility actions.
+                if (fromUser && !userSeeking) {
                     sliderDragUpdateJob?.cancel()
-                    sliderDragUpdateJob = lifecycleScope.launch {
+                    sliderDragUpdateJob = viewLifecycleOwner.lifecycleScope.launch {
                         delay(200.milliseconds)
-                        seekTo(value)
+                        timeUpdateJob?.cancel()
+                        connectionHelper.updatePlaybackPosition(playerId, value.toInt())
                     }
                 }
             }
@@ -324,10 +306,29 @@ class NowPlayingFragment :
                             currentSong = nowPlaying
                             binding.toolbar.invalidateMenu()
                             updateFavoriteState()
+                        } else if (nowPlaying != null && currentSongIsFavorite == null &&
+                            favoriteUpdateJob?.isActive != true
+                        ) {
+                            updateFavoriteState()
                         }
                     }
             }
         }
+    }
+
+    override fun onDestroyView() {
+        sliderDragUpdateJob?.cancel()
+        timeUpdateJob?.cancel()
+        userSeeking = false
+        pendingPlayStateJob?.cancel()
+        pendingPlayState = null
+        lastPlayState = null
+        favoriteUpdateJob?.cancel()
+        currentSong = null
+        currentSongUrl = null
+        currentSongTitle = null
+        currentSongIsFavorite = null
+        super.onDestroyView()
     }
 
     override fun onViewStateRestored(savedInstanceState: Bundle?) {
@@ -399,9 +400,6 @@ class NowPlayingFragment :
         R.id.clear_playlist -> {
             lifecycleScope.launch {
                 connectionHelper.clearCurrentPlaylist(playerId)
-                // Clearing is deliberate; a playlist the user threw away must not come back
-                // when the app restores the last session.
-                prefs.edit { clearLastPlaylist() }
             }
             true
         }
@@ -443,22 +441,21 @@ class NowPlayingFragment :
 
     // Private implementation details
 
-    /**
-     * Runs [block], returning null in case of a request failure. Failures are reported as
-     * CancellationException by the connection helper, which is why actual cancellation of this
-     * coroutine has to be treated differently.
-     */
-    private suspend fun <T> CoroutineScope.requestOrNull(block: suspend () -> T): T? = try {
-        block()
-    } catch (e: Exception) {
-        if (isActive) {
+    private suspend fun <T> requestOrNull(block: suspend () -> T): T? = supervisorScope {
+        try {
+            async {
+                if (connectionHelper.state.value is ConnectionState.Connected) block() else null
+            }.await()
+        } catch (e: CancellationException) {
+            ensureActive()
+            null // A request failure cancels its child; view cancellation still propagates.
+        } catch (e: CometdClient.CometdException) {
             null
-        } else {
-            throw e
         }
     }
 
     private fun updateFavoriteState() {
+        if (view == null) return
         favoriteUpdateJob?.cancel()
         currentSongUrl = null
         currentSongTitle = null
@@ -466,7 +463,7 @@ class NowPlayingFragment :
         updateFavoriteIcon()
 
         val song = currentSong ?: return
-        favoriteUpdateJob = lifecycleScope.launch {
+        favoriteUpdateJob = viewLifecycleOwner.lifecycleScope.launch {
             val info = requestOrNull { connectionHelper.getCurrentTrackInfo(playerId) }
                 ?: return@launch
             val url = info.url ?: return@launch
@@ -484,25 +481,15 @@ class NowPlayingFragment :
     }
 
     private fun updateFavoriteIcon() {
-        // While the server state is still unknown, show the button in "not favorite" state in
-        // order to avoid it flickering when the state is fetched.
         val isFavorite = currentSongIsFavorite == true
-        // The button belongs to the toolbar, which is hidden in the collapsed state
-        val expanded = binding.container.currentState == R.id.expanded
-        binding.favorite.isVisible = expanded && currentSong != null
+        binding.favorite.isVisible = currentSong != null
+        binding.favorite.isEnabled = currentSongUrl != null && currentSongIsFavorite != null
+        binding.favorite.alpha = if (binding.favorite.isEnabled) 1F else 0.5F
         binding.favorite.setImageResource(
-            if (isFavorite) {
-                R.drawable.ic_favorite_24dp
-            } else {
-                R.drawable.ic_favorite_border_24dp
-            }
+            if (isFavorite) R.drawable.ic_favorite_24dp else R.drawable.ic_favorite_border_24dp
         )
         binding.favorite.contentDescription = getString(
-            if (isFavorite) {
-                R.string.menu_favorite_remove
-            } else {
-                R.string.menu_favorite_add
-            }
+            if (isFavorite) R.string.menu_favorite_remove else R.string.menu_favorite_add
         )
     }
 
@@ -511,57 +498,29 @@ class NowPlayingFragment :
         val title = currentSongTitle.orEmpty()
         val wasFavorite = currentSongIsFavorite ?: return
         val song = currentSong ?: return
+        if (favoriteUpdateJob?.isActive == true) return
 
-        favoriteUpdateJob?.cancel()
-        // Update the icon right away, from the user's point of view the change is done
         currentSongIsFavorite = !wasFavorite
         updateFavoriteIcon()
-
-        favoriteUpdateJob = lifecycleScope.launch {
-            val requestSucceeded = try {
-                requestOrNull {
-                    if (wasFavorite) {
-                        connectionHelper.removeFavorite(playerId, url, title)
-                    } else {
-                        connectionHelper.addFavorite(playerId, url, title)
-                    }
-                } != null
-            } catch (e: CancellationException) {
-                // A connection level failure cancels this coroutine instead of throwing, so
-                // treat it as a failed write unless a newer tap replaced this job.
-                if (coroutineContext[Job] !== favoriteUpdateJob) {
-                    throw e
+        binding.favorite.isEnabled = false
+        favoriteUpdateJob = viewLifecycleOwner.lifecycleScope.launch {
+            val succeeded = requestOrNull {
+                if (wasFavorite) {
+                    connectionHelper.removeFavorite(playerId, url, title)
+                } else {
+                    connectionHelper.addFavorite(playerId, url, title)
                 }
-                false
+            } != null
+            if (currentSong != song) return@launch
+            currentSongIsFavorite = if (succeeded) {
+                requestOrNull { connectionHelper.isFavorite(playerId, url) } ?: !wasFavorite
+            } else {
+                wasFavorite
             }
-
-            if (!requestSucceeded) {
-                if (currentSong == song) {
-                    currentSongIsFavorite = wasFavorite
-                    updateFavoriteIcon()
-                }
-                listener.showTransientMessage(getString(R.string.favorite_error))
-                return@launch
+            updateFavoriteIcon()
+            if (!succeeded) {
+                Toast.makeText(requireContext(), R.string.favorite_error, Toast.LENGTH_SHORT).show()
             }
-
-            // Ask the server for the actual state, in case the favorites were changed elsewhere
-            val isFavorite = requestOrNull { connectionHelper.isFavorite(playerId, url) }
-                ?: !wasFavorite
-            if (currentSong == song) {
-                currentSongIsFavorite = isFavorite
-                updateFavoriteIcon()
-            }
-
-            listener.showTransientMessage(
-                getString(
-                    if (isFavorite) {
-                        R.string.favorite_added
-                    } else {
-                        R.string.favorite_removed
-                    }
-                ),
-                title
-            )
         }
     }
 
@@ -587,22 +546,14 @@ class NowPlayingFragment :
         }
     }
 
-    /** The local player's position while we play ourselves, the server's otherwise. */
-    private fun displayPosition(status: PlayerStatus) =
-        LocalPlayerPosition.forPlayer(playerId) ?: status.currentPlayPosition
-
-    /**
-     * Shows [playState] on the play/pause button until the server reports it, and falls back to
-     * the last state the server reported if it never does (e.g. the command got lost).
-     */
     private fun showPendingPlayState(playState: PlayerStatus.PlayState) {
         pendingPlayState = playState
         showPlayPauseIcon(playState == PlayerStatus.PlayState.Playing)
         pendingPlayStateJob?.cancel()
-        pendingPlayStateJob = lifecycleScope.launch {
+        pendingPlayStateJob = viewLifecycleOwner.lifecycleScope.launch {
             delay(PLAY_STATE_TIMEOUT_MS.milliseconds)
             pendingPlayState = null
-            lastStatus?.let { update(it) }
+            lastPlayState?.let { showPlayPauseIcon(it == PlayerStatus.PlayState.Playing) }
         }
     }
 
@@ -615,9 +566,8 @@ class NowPlayingFragment :
 
     @OptIn(ExperimentalTime::class)
     private fun update(status: PlayerStatus) {
-        lastStatus = status
+        lastPlayState = status.playbackState
         val currentSong = status.playlist.nowPlaying
-        dropStaleSeek(currentSong)
 
         if (currentSong == null) {
             binding.container.transitionToState(R.id.collapsed)
@@ -657,23 +607,30 @@ class NowPlayingFragment :
                     0.1F
                 )
                 val position =
-                    displayPosition(status)?.toDouble(DurationUnit.SECONDS)?.toFloat() ?: 0F
+                    (
+                        connectionHelper.localPlayPosition(playerId, status)
+                            ?: status.currentPlayPosition
+                        )
+                        ?.toDouble(DurationUnit.SECONDS)?.toFloat() ?: 0F
                 valueTo = duration
                 // The server-reported position can exceed the song duration (e.g. when the
                 // track end is reached) or be negative; Slider doesn't accept such values.
-                val newValue = position.coerceIn(0F, duration)
-                if (canApplyPosition(newValue)) {
-                    value = newValue
+                isEnabled = status.playbackState != PlayerStatus.PlayState.Stopped
+                if (!isEnabled) userSeeking = false
+                if (!userSeeking) {
+                    value = position.coerceIn(0F, duration)
                 } else if (value > duration) {
-                    // The update is held back (a seek is pending or the user drags the slider),
-                    // but the value must stay inside the range or Slider crashes when drawn.
                     value = duration
                 }
-                isEnabled = status.playbackState != PlayerStatus.PlayState.Stopped
             }
             binding.progressMinimized.apply {
                 max = status.currentSongDuration.toInt(DurationUnit.SECONDS)
-                progress = displayPosition(status)?.toInt(DurationUnit.SECONDS) ?: 0
+                progress =
+                    (
+                        connectionHelper.localPlayPosition(playerId, status)
+                            ?: status.currentPlayPosition
+                        )
+                        ?.toInt(DurationUnit.SECONDS) ?: 0
             }
             binding.totalTime.text =
                 DateUtils.formatElapsedTime(status.currentSongDuration.toLong(DurationUnit.SECONDS))
@@ -682,21 +639,24 @@ class NowPlayingFragment :
                 timeUpdateJob = lifecycleScope.launch {
                     while (true) {
                         delay(1.seconds)
-                        // Use the interpolated position, not whole seconds: the status updates
-                        // write fractional positions, and rounding here would move the slider
-                        // backwards every second.
-                        val position = displayPosition(status) ?: Duration.ZERO
-                        val newValue = position.toDouble(DurationUnit.SECONDS).toFloat()
-                            .coerceIn(0F, binding.progressSlider.valueTo)
-                        if (canApplyPosition(newValue)) {
-                            binding.progressSlider.value = newValue
+                        val positionSeconds = (
+                            connectionHelper.localPlayPosition(playerId, status)
+                                ?: status.currentPlayPosition
+                            )?.inWholeSeconds ?: 0F
+                        // Duration is a float, but we increment in full seconds, thus it can happen
+                        // the calculated position becomes larger than the end position, which Slider
+                        // does not like.
+                        if (!userSeeking) {
+                            binding.progressSlider.value = positionSeconds.toFloat()
+                                .coerceIn(0F, binding.progressSlider.valueTo)
                         }
-                        binding.progressMinimized.progress = position.inWholeSeconds.toInt()
+                        binding.progressMinimized.progress = positionSeconds.toInt()
                     }
                 }
             }
         } else {
             binding.progressSlider.apply {
+                userSeeking = false
                 value = 0F
                 valueTo = 0.1F
                 isEnabled = false
@@ -735,8 +695,6 @@ class NowPlayingFragment :
             }
         )
 
-        // Show the state a press asked for right away; a status that is still in flight would
-        // otherwise flip the button back and forth.
         if (pendingPlayState == status.playbackState) {
             pendingPlayState = null
             pendingPlayStateJob?.cancel()
@@ -746,13 +704,16 @@ class NowPlayingFragment :
         showPlayPauseIcon(isPlaying)
         binding.playPauseWrapper.setOnClickListener {
             if (connectionHelper.state.value !is ConnectionState.Connected) {
-                // The request could not be delivered, so do not pretend it was.
-                listener.showTransientMessage(
-                    getString(R.string.connection_error_text_no_connection)
-                )
+                Toast.makeText(
+                    requireContext(),
+                    R.string.connection_error_text_no_connection,
+                    Toast.LENGTH_SHORT
+                ).show()
                 return@setOnClickListener
             }
-            val targetState = if (isPlaying) {
+            val playing = (pendingPlayState ?: lastPlayState) ==
+                PlayerStatus.PlayState.Playing
+            val targetState = if (playing) {
                 PlayerStatus.PlayState.Paused
             } else {
                 PlayerStatus.PlayState.Playing
@@ -763,6 +724,9 @@ class NowPlayingFragment :
             }
         }
         binding.playPauseWrapper.setOnLongClickListener {
+            if (connectionHelper.state.value !is ConnectionState.Connected) {
+                return@setOnLongClickListener true
+            }
             showPendingPlayState(PlayerStatus.PlayState.Stopped)
             lifecycleScope.launch {
                 connectionHelper.changePlaybackState(playerId, PlayerStatus.PlayState.Stopped)
@@ -789,66 +753,7 @@ class NowPlayingFragment :
 
     private fun sheetIsExpanded() = binding.container.currentState == R.id.expanded
 
-    /**
-     * Sends a seek request and keeps the slider at the requested position until a status close
-     * to it arrives - otherwise the updates in between move it back to the server's position.
-     */
-    private suspend fun seekTo(positionSeconds: Float) {
-        pendingSeekPosition = positionSeconds
-        pendingSeekTimestamp = SystemClock.elapsedRealtime()
-        pendingSeekSong = currentSong
-        connectionHelper.updatePlaybackPosition(playerId, positionSeconds.toInt())
-    }
-
-    /**
-     * Forgets a seek that was made in another song: the position it waits for never arrives there,
-     * so the slider would stay at the seeked position - clamped to the new song's duration, i.e.
-     * at the end of the bar - until the settle timeout passes.
-     */
-    private fun dropStaleSeek(currentSong: Playlist.PlaylistItem?) {
-        if (pendingSeekPosition == null) {
-            pendingSeekSong = null
-            return
-        }
-        val seekSong = pendingSeekSong ?: return
-        if (seekSong.title != currentSong?.title ||
-            seekSong.artist != currentSong?.artist ||
-            seekSong.album != currentSong?.album
-        ) {
-            pendingSeekPosition = null
-            pendingSeekSong = null
-        }
-    }
-
-    /** Whether the slider may be moved to the given position. */
-    private fun canApplyPosition(newValue: Float): Boolean {
-        if (isUserSeeking()) {
-            return false
-        }
-        val pending = pendingSeekPosition ?: return true
-        val settled = (newValue - pending).absoluteValue <= SLIDER_SETTLE_TOLERANCE ||
-            SystemClock.elapsedRealtime() - pendingSeekTimestamp > SLIDER_SETTLE_TIMEOUT_MS
-        if (settled) {
-            pendingSeekPosition = null
-        }
-        return settled
-    }
-
-    /** Whether the user moves the slider right now; the timeout recovers from a lost touch end. */
-    private fun isUserSeeking() = userSeeking &&
-        SystemClock.elapsedRealtime() - lastSeekInputTimestamp < SLIDER_INPUT_TIMEOUT_MS
-
     companion object {
-        /** Position difference within which a status update is considered to reflect our seek. */
-        private const val SLIDER_SETTLE_TOLERANCE = 3F
-
-        /** Time after which a pending seek is given up on, in milliseconds. */
-        private const val SLIDER_SETTLE_TIMEOUT_MS = 5_000L
-
-        /** Time after which a drag without input is considered finished, in milliseconds. */
-        private const val SLIDER_INPUT_TIMEOUT_MS = 10_000L
-
-        /** Time after which a play state we asked for is given up on, in milliseconds. */
         private const val PLAY_STATE_TIMEOUT_MS = 3_000L
 
         fun create(playerId: PlayerId) = NowPlayingFragment().apply {

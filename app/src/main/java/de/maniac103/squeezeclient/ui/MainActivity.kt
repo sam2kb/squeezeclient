@@ -116,10 +116,6 @@ class MainActivity :
         supportFragmentManager.findFragmentById(binding.searchContainer.id) as? SearchFragment
     private val volumeFragment get() =
         supportFragmentManager.findFragmentById(binding.volumeContainer.id) as? VolumeFragment
-    private val displayStatusFragment get() =
-        supportFragmentManager.findFragmentById(
-            binding.statusContainer.id
-        ) as? DisplayStatusFragment
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -319,10 +315,6 @@ class MainActivity :
 
     override fun showVolumePopup() {
         volumeFragment?.showIfNeeded(5.seconds)
-    }
-
-    override fun showTransientMessage(vararg text: String) {
-        displayStatusFragment?.showLocalMessage(*text)
     }
 
     override fun onContextMenuAction(

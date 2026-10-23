@@ -19,9 +19,5 @@ package de.maniac103.squeezeclient.cometd.request
 
 import de.maniac103.squeezeclient.model.PlayerId
 
-/**
- * Adds a track to the favorites without asking for confirmation, as opposed to the jivefavorites
- * command used by the favorites context menu action.
- */
 class FavoritesAddRequest(playerId: PlayerId, url: String, title: String) :
     NonPagedPlayerRequest(playerId, "favorites", "add", "url:$url", "title:$title", "type:audio")

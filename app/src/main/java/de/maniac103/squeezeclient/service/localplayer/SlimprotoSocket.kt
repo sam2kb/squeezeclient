@@ -22,8 +22,6 @@ import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
 import de.maniac103.squeezeclient.extfuncs.getOrCreateDeviceIdentifier
-import de.maniac103.squeezeclient.extfuncs.localPlayerId
-import de.maniac103.squeezeclient.extfuncs.localPlayerMac
 import de.maniac103.squeezeclient.extfuncs.putAsAscii
 import de.maniac103.squeezeclient.extfuncs.readRemainderAsArray
 import de.maniac103.squeezeclient.extfuncs.readString
@@ -46,12 +44,16 @@ import okio.buffer
 import okio.sink
 import okio.source
 
-class SlimprotoSocket(private val prefs: SharedPreferences) {
+class SlimprotoSocket(prefs: SharedPreferences) {
     val host: String? = prefs.serverConfig?.url?.host
     private val deviceIdentifier: UUID = prefs.getOrCreateDeviceIdentifier()
     private var socket: SocketHolder? = null
 
-    val playerId get() = prefs.localPlayerId
+    private val playerMac get() = ByteArray(6) { i ->
+        (deviceIdentifier.leastSignificantBits shr (i * 8)).toByte()
+    }
+
+    val playerId get() = PlayerId(playerMac.joinToString(":") { "%02x".format(it) })
 
     private val packetParsers: Map<String, (ByteBuffer) -> CommandPacket> = mapOf(
         "aude" to this::parseAudioEnablePacket,
@@ -299,7 +301,7 @@ class SlimprotoSocket(private val prefs: SharedPreferences) {
         val payload = ByteBuffer.allocate(36 + capabilityString.length).apply {
             put(12) // device ID
             put(1) // revision
-            put(prefs.localPlayerMac) // MAC
+            put(playerMac) // MAC
             putLong(deviceIdentifier.mostSignificantBits) // UUID
             putLong(deviceIdentifier.leastSignificantBits)
             putShort(if (reconnect) 0x4000 else 0) // WLAN channel list
@@ -434,9 +436,7 @@ class SlimprotoSocket(private val prefs: SharedPreferences) {
                     sink.flush()
                 }
             } catch (e: IOException) {
-                // The connection went away while a command was being sent (the server closed it,
-                // the network dropped). Closing the socket makes the read side notice it too;
-                // letting the exception escape would take down whichever coroutine sent it.
+                // Unblock the reader so the existing reconnect loop can recover.
                 Log.d(TAG, "Could not send a command, closing the connection", e)
                 closeQuietly()
             }
@@ -447,9 +447,15 @@ class SlimprotoSocket(private val prefs: SharedPreferences) {
         }
 
         override fun close() {
-            sink.close()
-            source.close()
-            socket.close()
+            try {
+                socket.close()
+            } finally {
+                try {
+                    sink.close()
+                } finally {
+                    source.close()
+                }
+            }
         }
 
         companion object {
